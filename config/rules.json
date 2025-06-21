@@ -1,0 +1,44 @@
+{
+  "financial_threshold": 500000,
+  "currency": "BTH",
+  "blocked_nationalities": [
+    "Myanmar",
+    "Cambodia", 
+    "Laos",
+    "Bangladesh",
+    "Pakistan",
+    "Afghanistan",
+    "Somalia",
+    "Yemen",
+    "Syria",
+    "Iraq"
+  ],
+  "special_rules": [
+    {
+      "name": "thailand_visa_check",
+      "condition": "location == 'Thailand'",
+      "requirements": ["visa_type_required"],
+      "description": "Thailand residents must specify their current visa type"
+    }
+  ],
+  "messages": {
+    "acceptance": {
+      "subject": "Welcome to VisaT - Your Consultation is Approved!",
+      "template": "acceptance_email"
+    },
+    "rejection": {
+      "subject": "VisaT Consultation Update",
+      "template": "rejection_email"
+    }
+  },
+  "integrations": {
+    "calendly": {
+      "default_link": "https://calendly.com/visat-consultation",
+      "event_duration": 30
+    },
+    "whatsapp": {
+      "response_delay": 2,
+      "max_retries": 3
+    }
+  }
+}

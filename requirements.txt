@@ -1,0 +1,48 @@
+# VisaT - Visa Consulting Automation System
+# Python Dependencies
+
+# Web Framework
+Flask==2.3.3
+Flask-CORS==4.0.0
+
+# HTTP Requests
+requests==2.31.0
+
+# Google APIs
+google-auth==2.23.3
+google-auth-oauthlib==1.0.0
+google-auth-httplib2==0.1.1
+google-api-python-client==2.100.0
+gspread==5.11.1
+
+# Email
+smtplib2==0.2.1
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# Data Processing
+pandas==2.1.1
+
+# JSON Processing
+jsonschema==4.19.1
+
+# Logging
+colorlog==6.7.0
+
+# Development & Testing
+pytest==7.4.2
+pytest-flask==1.2.0
+
+# Production Server
+gunicorn==21.2.0
+
+# Date/Time Handling
+python-dateutil==2.8.2
+
+# Validation
+email-validator==2.0.0
+phonenumbers==8.13.22
+
+# Security
+cryptography==41.0.4
