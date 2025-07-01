@@ -1,0 +1,109 @@
+# VisaT Project - Git Ignore File
+# Protects sensitive configuration and credentials
+
+# Environment Variables (CRITICAL - NEVER COMMIT)
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+*.env
+
+# API Credentials and Configuration Files (CRITICAL - NEVER COMMIT)
+config/gmail_credentials.json
+config/google_service_account.json
+config/*.json
+config/credentials/
+config/keys/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# IDE and Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and Databases
+*.log
+*.sqlite3
+*.db
+
+# Flask
+instance/
+.webassets-cache
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Documentation builds
+docs/_build/
+
+# Backup files
+*.bak
+*.backup
+*.tmp
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Security and sensitive data
+secrets/
+private/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Temporary files
+temp/
+tmp/
+*.temp 
