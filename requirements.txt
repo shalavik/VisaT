@@ -16,7 +16,6 @@ google-api-python-client==2.100.0
 gspread==5.11.1
 
 # Email
-smtplib2==0.2.1
 
 # Environment Variables
 python-dotenv==1.0.0

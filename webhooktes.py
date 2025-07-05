@@ -8,7 +8,7 @@ import os
 import asyncio
 import logging
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -25,10 +25,10 @@ logger = logging.getLogger(__name__)
 from src.handlers.contact_handler import ContactHandler
 from src.handlers.form_processor import FormProcessor
 from src.engines.qualification_engine import QualificationEngine
-from src.integrations.gmail_client import GmailClient
+# from src.integrations.gmail_client import GmailClient
 from src.integrations.whatsapp_client import WhatsAppClient
-from src.integrations.sheets_client import SheetsClient
-from src.integrations.calendly_client import CalendlyClient
+# from src.integrations.sheets_client import SheetsClient
+# from src.integrations.calendly_client import CalendlyClient
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -40,10 +40,10 @@ form_processor = FormProcessor()
 qualification_engine = QualificationEngine()
 
 # Initialize integrations
-gmail_client = GmailClient()
+# gmail_client = GmailClient()
 whatsapp_client = WhatsAppClient()
-sheets_client = SheetsClient()
-calendly_client = CalendlyClient()
+# sheets_client = SheetsClient()
+# calendly_client = CalendlyClient()
 
 @app.route('/')
 def health_check():
@@ -54,6 +54,17 @@ def health_check():
         "version": "1.0.0",
         "timestamp": datetime.utcnow().isoformat()
     })
+
+@app.route('/webhook', methods=['GET', 'POST'])
+def webhook_redirect():
+    """Redirect /webhook to /webhook/whatsapp"""
+    logger.info(f"Received request to /webhook - redirecting to /webhook/whatsapp")
+    # For GET requests, we need to pass along the query parameters
+    if request.method == 'GET':
+        return redirect(f"/webhook/whatsapp?{request.query_string.decode()}")
+    # For POST requests, we'll handle it directly as a WhatsApp webhook
+    else:
+        return whatsapp_webhook()
 
 @app.route('/webhook/whatsapp', methods=['GET', 'POST'])
 def whatsapp_webhook():
@@ -82,51 +93,51 @@ def whatsapp_webhook():
         logger.error(f"WhatsApp webhook error: {e}")
         return jsonify({"error": "Processing failed"}), 500
 
-@app.route('/webhook/facebook', methods=['GET', 'POST'])
-def facebook_webhook():
-    """Facebook Messenger webhook endpoint"""
-    try:
-        if request.method == 'GET':
-            # Webhook verification
-            verify_token = request.args.get('hub.verify_token')
-            if verify_token == os.getenv('FACEBOOK_VERIFY_TOKEN'):
-                logger.info("Facebook webhook verified successfully")
-                return request.args.get('hub.challenge')
-            logger.warning("Facebook webhook verification failed")
-            return 'Verification failed', 403
+# @app.route('/webhook/facebook', methods=['GET', 'POST'])
+# def facebook_webhook():
+#     """Facebook Messenger webhook endpoint"""
+#     try:
+#         if request.method == 'GET':
+#             # Webhook verification
+#             verify_token = request.args.get('hub.verify_token')
+#             if verify_token == os.getenv('FACEBOOK_VERIFY_TOKEN'):
+#                 logger.info("Facebook webhook verified successfully")
+#                 return request.args.get('hub.challenge')
+#             logger.warning("Facebook webhook verification failed")
+#             return 'Verification failed', 403
         
-        elif request.method == 'POST':
-            # Process incoming Facebook message
-            data = request.get_json()
-            logger.info(f"Facebook webhook received: {data}")
+#         elif request.method == 'POST':
+#             # Process incoming Facebook message
+#             data = request.get_json()
+#             logger.info(f"Facebook webhook received: {data}")
             
-            # Handle message asynchronously
-            result = contact_handler.handle_facebook_message(data)
+#             # Handle message asynchronously
+#             result = contact_handler.handle_facebook_message(data)
             
-            return jsonify({"status": "received", "result": result})
+#             return jsonify({"status": "received", "result": result})
             
-    except Exception as e:
-        logger.error(f"Facebook webhook error: {e}")
-        return jsonify({"error": "Processing failed"}), 500
+#     except Exception as e:
+#         logger.error(f"Facebook webhook error: {e}")
+#         return jsonify({"error": "Processing failed"}), 500
 
-@app.route('/webhook/forms', methods=['POST'])
-def forms_webhook():
-    """Google Forms webhook endpoint"""
-    try:
-        data = request.get_json()
-        logger.info(f"Forms webhook received: {data}")
+# @app.route('/webhook/forms', methods=['POST'])
+# def forms_webhook():
+#     """Google Forms webhook endpoint"""
+#     try:
+#         data = request.get_json()
+#         logger.info(f"Forms webhook received: {data}")
         
-        # Process form submission
-        result = form_processor.process_submission(data)
+#         # Process form submission
+#         result = form_processor.process_submission(data)
         
-        return jsonify({"status": "received", "result": result})
+#         return jsonify({"status": "received", "result": result})
         
-    except Exception as e:
-        logger.error(f"Forms webhook error: {e}")
-        return jsonify({"error": "Processing failed"}), 500
+#     except Exception as e:
+#         logger.error(f"Forms webhook error: {e}")
+#         return jsonify({"error": "Processing failed"}), 500
 
-@app.route('/api/qualify', methods=['POST'])
-def qualify_lead():
+# @app.route('/api/qualify', methods=['POST'])
+# def qualify_lead():
     """Manual lead qualification endpoint for testing"""
     try:
         data = request.get_json()
@@ -184,24 +195,24 @@ def test_whatsapp():
         logger.error(f"WhatsApp test error: {e}")
         return jsonify({"error": "Test failed"}), 500
 
-@app.route('/api/test-email', methods=['POST'])
-def test_email():
-    """Test email sending"""
-    try:
-        data = request.get_json()
-        email = data.get('email')
-        subject = data.get('subject')
-        message = data.get('message')
+# @app.route('/api/test-email', methods=['POST'])
+# def test_email():
+#     """Test email sending"""
+#     try:
+#         data = request.get_json()
+#         email = data.get('email')
+#         subject = data.get('subject')
+#         message = data.get('message')
         
-        if not email or not subject or not message:
-            return jsonify({"error": "Email, subject, and message required"}), 400
+#         if not email or not subject or not message:
+#             return jsonify({"error": "Email, subject, and message required"}), 400
             
-        result = gmail_client.send_email(email, subject, message)
-        return jsonify({"status": "sent", "result": result})
+#         result = gmail_client.send_email(email, subject, message)
+#         return jsonify({"status": "sent", "result": result})
         
-    except Exception as e:
-        logger.error(f"Email test error: {e}")
-        return jsonify({"error": "Test failed"}), 500
+#     except Exception as e:
+#         logger.error(f"Email test error: {e}")
+#         return jsonify({"error": "Test failed"}), 500
 
 @app.errorhandler(404)
 def not_found(error):
