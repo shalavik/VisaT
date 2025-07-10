@@ -1,26 +1,36 @@
 #!/usr/bin/env python3
 """
-WhatsApp Business API Client
-Handles WhatsApp messaging integration
+WhatsApp Client Factory
+Chooses between Business API and Personal WhatsApp modes
 """
 
 import os
-import requests
 import logging
+from .business_whatsapp_client import BusinessWhatsAppClient
+from .personal_whatsapp_client import PersonalWhatsAppClient
 
 logger = logging.getLogger(__name__)
 
 class WhatsAppClient:
-    """WhatsApp Business API client"""
+    """WhatsApp client factory that chooses between business and personal modes"""
     
     def __init__(self):
-        self.access_token = os.getenv('WHATSAPP_ACCESS_TOKEN')
-        self.phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
-        self.verify_token = os.getenv('WHATSAPP_VERIFY_TOKEN')
-        self.api_url = f"https://graph.facebook.com/v18.0/{self.phone_number_id}/messages"
+        self.mode = os.getenv('WHATSAPP_MODE', 'business').lower()
+        self.client = None
         
-        if not all([self.access_token, self.phone_number_id]):
-            logger.warning("WhatsApp credentials not fully configured")
+        if self.mode == 'personal':
+            logger.info("Initializing Personal WhatsApp client (Selenium-based)")
+            self.client = PersonalWhatsAppClient()
+            # Personal client will auto-start session during initialization
+        elif self.mode == 'business':
+            logger.info("Initializing Business WhatsApp client (Meta API)")
+            self.client = BusinessWhatsAppClient()
+        else:
+            logger.error(f"Invalid WhatsApp mode: {self.mode}. Using business mode as fallback.")
+            self.mode = 'business'
+            self.client = BusinessWhatsAppClient()
+        
+        logger.info(f"WhatsApp client initialized in {self.mode} mode")
     
     def send_message(self, to_phone, message):
         """
@@ -33,46 +43,14 @@ class WhatsAppClient:
         Returns:
             dict: Result of message sending
         """
-        try:
-            headers = {
-                'Authorization': f'Bearer {self.access_token}',
-                'Content-Type': 'application/json'
-            }
-            
-            payload = {
-                'messaging_product': 'whatsapp',
-                'to': to_phone,
-                'type': 'text',
-                'text': {
-                    'body': message
-                }
-            }
-            
-            response = requests.post(self.api_url, headers=headers, json=payload)
-            
-            if response.status_code == 200:
-                logger.info(f"WhatsApp message sent successfully to {to_phone}")
-                return {
-                    "status": "sent",
-                    "to": to_phone,
-                    "message_id": response.json().get('messages', [{}])[0].get('id'),
-                    "message": "Message sent successfully"
-                }
-            else:
-                logger.error(f"WhatsApp API error: {response.status_code} - {response.text}")
-                return {
-                    "status": "failed",
-                    "to": to_phone,
-                    "error": f"API error: {response.status_code}"
-                }
-                
-        except Exception as e:
-            logger.error(f"Failed to send WhatsApp message to {to_phone}: {e}")
+        if not self.client:
             return {
                 "status": "failed",
                 "to": to_phone,
-                "error": str(e)
+                "error": "WhatsApp client not initialized"
             }
+        
+        return self.client.send_message(to_phone, message)
     
     def send_form_link(self, to_phone, form_url):
         """
@@ -85,25 +63,14 @@ class WhatsAppClient:
         Returns:
             dict: Result of message sending
         """
-        message = """🇹🇭 Thailand Visa Consultation - VisaT
-
-Hello! Thank you for reaching out about Thailand visa services.
-
-To provide you with the most accurate consultation, please fill out our quick assessment form:
-
-👉 https://docs.google.com/forms/d/e/1FAIpQLScol3ZjPUuAueFf32s3-dHQiTE3oL1qmkDZGdt-YSqWffecdw/viewform?usp=sharing&ouid=114692513524380498491
-
-This will help us:
-✅ Understand your specific situation
-✅ Provide personalized visa guidance
-✅ Connect you with the right services
-
-The form takes just 2-3 minutes to complete.
-
-Best regards,
-Slava - Thailand Visa Specialist"""
+        if not self.client:
+            return {
+                "status": "failed",
+                "to": to_phone,
+                "error": "WhatsApp client not initialized"
+            }
         
-        return self.send_message(to_phone, message)
+        return self.client.send_form_link(to_phone, form_url)
     
     def send_follow_up(self, to_phone, name, qualified=True):
         """
@@ -117,34 +84,14 @@ Slava - Thailand Visa Specialist"""
         Returns:
             dict: Result of message sending
         """
-        if qualified:
-            message = f"""
-🎉 Great news, {name}!
-
-You've been pre-qualified for Thailand visa consultation! 
-
-📧 Check your email for detailed next steps and booking information.
-
-Our team is excited to help you with your Thailand journey! 🇹🇭
-
-Best regards,
-VisaT Team
-            """.strip()
-        else:
-            message = f"""
-Hi {name},
-
-Thank you for your interest in Thailand visa services.
-
-📧 Please check your email for helpful resources and information about visa requirements.
-
-Feel free to reach out when you're ready to explore Thailand visa options in the future.
-
-Best regards,
-VisaT Team 🇹🇭
-            """.strip()
+        if not self.client:
+            return {
+                "status": "failed",
+                "to": to_phone,
+                "error": "WhatsApp client not initialized"
+            }
         
-        return self.send_message(to_phone, message)
+        return self.client.send_follow_up(to_phone, name, qualified)
     
     def verify_webhook(self, verify_token, challenge):
         """
@@ -157,9 +104,76 @@ VisaT Team 🇹🇭
         Returns:
             str or None: Challenge if verification successful, None otherwise
         """
-        if verify_token == self.verify_token:
-            logger.info("WhatsApp webhook verification successful")
-            return challenge
+        if not self.client:
+            logger.error("WhatsApp client not initialized")
+            return None
+        
+        return self.client.verify_webhook(verify_token, challenge)
+    
+    def get_mode(self):
+        """Get current WhatsApp mode"""
+        return self.mode
+    
+    def get_status(self):
+        """Get client status"""
+        status = {
+            "mode": self.mode,
+            "client_initialized": self.client is not None
+        }
+        
+        # Add mode-specific status
+        if self.mode == 'personal' and hasattr(self.client, 'get_session_status'):
+            status.update(self.client.get_session_status())
+        elif self.mode == 'business':
+            status.update({
+                "phone_number_id": getattr(self.client, 'phone_number_id', None),
+                "api_configured": bool(getattr(self.client, 'phone_number_id', None))
+            })
+        
+        return status
+    
+    def restart_personal_session(self):
+        """Restart personal WhatsApp session (only for personal mode)"""
+        if self.mode == 'personal' and self.client:
+            logger.info("Restarting personal WhatsApp session")
+            self.client.stop_session()
+            return self.client.start_session()
         else:
-            logger.warning("WhatsApp webhook verification failed")
-            return None 
+            logger.warning("Restart session called on non-personal mode")
+            return False
+    
+    def start_personal_session(self):
+        """Start personal WhatsApp session (only for personal mode)"""
+        if self.mode == 'personal' and self.client:
+            logger.info("Starting personal WhatsApp session")
+            return self.client.start_session()
+        else:
+            logger.warning("Start session called on non-personal mode")
+            return False
+    
+    def stop_personal_session(self):
+        """Stop personal WhatsApp session (only for personal mode)"""
+        if self.mode == 'personal' and self.client:
+            logger.info("Stopping personal WhatsApp session")
+            self.client.stop_session()
+            return True
+        else:
+            logger.warning("Stop session called on non-personal mode")
+            return False
+    
+    def start_monitoring(self, force=False):
+        """Start message monitoring (only for personal mode)"""
+        if self.mode == 'personal' and self.client:
+            logger.info("Starting WhatsApp message monitoring")
+            return self.client.start_monitoring(force=force)
+        else:
+            logger.warning("Start monitoring called on non-personal mode")
+            return False
+    
+    def __del__(self):
+        """Cleanup when object is destroyed"""
+        if self.mode == 'personal' and self.client:
+            try:
+                self.client.stop_session()
+            except:
+                pass 

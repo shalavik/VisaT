@@ -1,26 +1,14 @@
 {
-  "financial_threshold": 500000,
+  "blocked_nationalities": ["Afghanistan", "Pakistan"],
+  "financial_threshold": 0,
   "currency": "BTH",
-  "blocked_nationalities": [
-    "Myanmar",
-    "Cambodia", 
-    "Laos",
-    "Bangladesh",
-    "Pakistan",
-    "Afghanistan",
-    "Somalia",
-    "Yemen",
-    "Syria",
-    "Iraq"
-  ],
-  "special_rules": [
-    {
-      "name": "thailand_visa_check",
-      "condition": "location == 'Thailand'",
-      "requirements": ["visa_type_required"],
-      "description": "Thailand residents must specify their current visa type"
+  "special_rules": {
+    "thailand_residents": {
+      "description": "No special restrictions for Thailand residents",
+      "required_visa_types": [],
+      "financial_multiplier": 1.0
     }
-  ],
+  },
   "messages": {
     "acceptance": {
       "subject": "Welcome to VisaT - Your Consultation is Approved!",
