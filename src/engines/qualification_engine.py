@@ -32,10 +32,9 @@ class QualificationEngine:
         """Get default business rules"""
         return {
             "blocked_nationalities": [
-                "Myanmar", "North Korea", "Iran", "Syria", "Afghanistan",
-                "Somalia", "Libya", "Yemen", "Sudan", "Venezuela"
+                "Afghanistan", "Pakistan"
             ],
-            "financial_threshold": 500000,
+            "financial_threshold": 0,  # No minimum financial requirement
             "currency": "BTH",
             "special_rules": {
                 "thailand_residents": {
@@ -62,8 +61,8 @@ class QualificationEngine:
             financial_status = prospect_data.get('financial_status', False)
             current_visa_type = prospect_data.get('current_visa_type', '').strip()
             
-            # Rule 1: Check blocked nationalities
-            blocked_nationalities = self.rules.get('blocked_nationalities', [])
+            # Rule 1: Check blocked nationalities (only Afghanistan and Pakistan)
+            blocked_nationalities = self.rules.get('blocked_nationalities', ['Afghanistan', 'Pakistan'])
             if nationality in blocked_nationalities:
                 return {
                     "qualified": False,
@@ -75,50 +74,22 @@ class QualificationEngine:
                     }
                 }
             
-            # Rule 2: Check financial requirements
-            if not financial_status:
-                financial_threshold = self.rules.get('financial_threshold', 500000)
-                currency = self.rules.get('currency', 'BTH')
-                
-                return {
-                    "qualified": False,
-                    "reason": "insufficient_funds",
-                    "message": f"Thailand visa applications require a minimum of {financial_threshold:,} {currency} in bank statements. Please ensure you meet this requirement before applying.",
-                    "details": {
-                        "required_amount": financial_threshold,
-                        "currency": currency,
-                        "rule": "financial_threshold"
-                    }
-                }
+            # Rule 2: Financial requirements - REMOVED (all financial levels accepted)
+            # Everyone is qualified regardless of financial status
             
-            # Rule 3: Special rules for Thailand residents
-            special_rules = self.rules.get('special_rules', {})
-            thailand_rules = special_rules.get('thailand_residents', {})
+            # Rule 3: Thailand residents - SIMPLIFIED (no longer blocking)
+            # We accept all Thailand residents regardless of visa type
             
-            if current_location.lower() in ['thailand', 'thai']:
-                required_visa_types = thailand_rules.get('required_visa_types', [])
-                if current_visa_type and current_visa_type not in required_visa_types:
-                    return {
-                        "qualified": False,
-                        "reason": "invalid_visa_type",
-                        "message": f"For Thailand residents, we require specific visa types. Your current visa type '{current_visa_type}' may need additional documentation.",
-                        "details": {
-                            "current_visa": current_visa_type,
-                            "required_types": required_visa_types,
-                            "rule": "thailand_residents"
-                        }
-                    }
-            
-            # If all rules pass, prospect is qualified
+            # If nationality is not blocked, prospect is qualified
             return {
                 "qualified": True,
                 "reason": "meets_requirements",
                 "message": "Congratulations! You meet our initial qualification criteria for Thailand visa consultation. Our team will contact you shortly to discuss your options.",
                 "details": {
                     "nationality": nationality,
-                    "financial_status": "confirmed",
+                    "financial_status": "accepted",
                     "location": current_location,
-                    "rules_passed": ["nationality_check", "financial_check"]
+                    "rules_passed": ["nationality_check"]
                 }
             }
             

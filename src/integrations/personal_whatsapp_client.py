@@ -689,10 +689,10 @@ VisaT Team 🇹🇭"""
             chat_container.click()
             time.sleep(2)
             
-            # Get template message (use plain text to avoid emoji encoding issues)
+            # Get template message (use default template with emojis - JavaScript handles them properly)
             from ..utils.whatsapp_templates import get_auto_reply_template
             template_message = get_auto_reply_template(
-                template_type='plain',  # Use plain text template for Chrome/Selenium compatibility
+                template_type='default',  # Use default template with emojis - JavaScript can handle them
                 form_url=os.getenv('GOOGLE_FORM_URL', 'https://docs.google.com/forms/d/e/1FAIpQLScol3ZjPUuAueFf32s3-dHQiTE3oL1qmkDZGdt-YSqWffecdw/viewform'),
                 consultant_name=os.getenv('WHATSAPP_TEMPLATE_CONSULTANT_NAME', 'Slava')
             )
@@ -734,7 +734,7 @@ VisaT Team 🇹🇭"""
         return None
     
     def _send_template_message(self, message: str) -> bool:
-        """Send template message using multiple selector strategies"""
+        """Send template message using JavaScript for proper formatting and emoji support"""
         try:
             # Find the message input box with multiple selector strategies
             message_box = None
@@ -758,34 +758,175 @@ VisaT Team 🇹🇭"""
                 logger.error("Could not find message input box")
                 return False
             
-            # Clear any existing text and send the template
-            message_box.clear()
-            message_box.send_keys(message)
-            time.sleep(1)
+            # Use JavaScript to set the message content with proper line breaks and emoji support
+            js_script = """
+            function sendWhatsAppMessage(element, message) {
+                try {
+                    // Clear any existing content
+                    element.innerHTML = '';
+                    element.textContent = '';
+                    
+                    // Focus the element
+                    element.focus();
+                    
+                    // Split message into lines and create proper DOM structure
+                    const lines = message.split('\\n');
+                    
+                    for (let i = 0; i < lines.length; i++) {
+                        // Add text content
+                        if (lines[i].trim() !== '') {
+                            element.appendChild(document.createTextNode(lines[i]));
+                        }
+                        
+                        // Add line break except for the last line
+                        if (i < lines.length - 1) {
+                            element.appendChild(document.createElement('br'));
+                        }
+                    }
+                    
+                    // Trigger comprehensive input events to notify WhatsApp
+                    const events = [
+                        new Event('input', { bubbles: true, cancelable: true }),
+                        new Event('change', { bubbles: true, cancelable: true }),
+                        new Event('keyup', { bubbles: true, cancelable: true }),
+                        new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: message })
+                    ];
+                    
+                    events.forEach(event => {
+                        try {
+                            element.dispatchEvent(event);
+                        } catch (e) {
+                            console.log('Event dispatch error:', e);
+                        }
+                    });
+                    
+                    // Wait a moment for WhatsApp to process
+                    setTimeout(() => {
+                        // Trigger additional events
+                        const compositionEvent = new CompositionEvent('compositionend', {
+                            bubbles: true,
+                            cancelable: true,
+                            data: message
+                        });
+                        element.dispatchEvent(compositionEvent);
+                    }, 100);
+                    
+                    return true;
+                } catch (error) {
+                    console.error('WhatsApp message injection error:', error);
+                    return false;
+                }
+            }
             
-            # Find and click send button with multiple strategies
+            return sendWhatsAppMessage(arguments[0], arguments[1]);
+            """
+            
+            # Execute JavaScript to set the message content
+            success = PersonalWhatsAppClient._driver.execute_script(js_script, message_box, message)
+            
+            if not success:
+                logger.error("JavaScript message setting failed")
+                return False
+            
+            # Wait longer for WhatsApp to process the content and enable send button
+            time.sleep(2)
+            
+            # Enhanced send button detection with comprehensive selectors
             send_button = None
             send_selectors = [
+                # Current WhatsApp Web send button selectors (2025)
                 'button[data-testid="compose-btn-send"]',
                 'span[data-testid="send"]',
                 'button[aria-label*="Send"]',
-                'button[title*="Send"]'
+                'button[title*="Send"]',
+                'button[data-tab="11"]',
+                'span[data-icon="send"]',
+                'button[type="submit"]',
+                # Parent container approach
+                'div[data-testid="conversation-compose-box-send"] button',
+                'div[role="button"][data-tab="11"]',
+                # SVG-based detection
+                'button svg[viewBox*="0 0 24 24"]',
+                'span svg[data-icon="send"]',
+                # Aria-label variations
+                'button[aria-label*="Enviar"]',  # Spanish
+                'button[aria-label*="Отправить"]',  # Russian  
+                'button[aria-label*="Envoyer"]',  # French
+                # Generic fallbacks
+                'button:last-child',
+                '[role="button"]:last-child'
             ]
             
-            for selector in send_selectors:
+            logger.info("Searching for send button...")
+            for i, selector in enumerate(send_selectors):
                 try:
                     send_button = PersonalWhatsAppClient._driver.find_element(By.CSS_SELECTOR, selector)
-                    if send_button and send_button.is_enabled():
+                    if send_button and send_button.is_displayed() and send_button.is_enabled():
+                        logger.info(f"✅ Found send button using selector {i+1}: {selector}")
                         break
-                except:
+                    else:
+                        logger.info(f"❌ Found element but not viable for selector {i+1}: {selector} (displayed={send_button.is_displayed() if send_button else None}, enabled={send_button.is_enabled() if send_button else None})")
+                        send_button = None
+                except Exception as selector_error:
+                    logger.debug(f"Selector '{selector}' failed: {selector_error}")
                     continue
             
-            if not send_button:
-                logger.error("Could not find send button")
-                return False
+            if send_button:
+                try:
+                    # Use JavaScript to click the send button for reliability
+                    PersonalWhatsAppClient._driver.execute_script("arguments[0].click();", send_button)
+                    logger.debug("Send button clicked successfully")
+                    return True
+                except Exception as click_error:
+                    logger.warning(f"Failed to click send button: {click_error}")
+                    # Fall through to Enter key fallback
             
-            send_button.click()
-            return True
+            # Fallback: Use Enter key to send message
+            logger.warning("Send button not found, trying Enter key fallback...")
+            try:
+                # Focus on the message box and press Enter
+                message_box.click()
+                message_box.send_keys(Keys.RETURN)
+                logger.info("✅ Message sent using Enter key fallback")
+                return True
+            except Exception as enter_error:
+                logger.error(f"Enter key fallback failed: {enter_error}")
+                
+                # Final fallback: JavaScript Enter simulation
+                try:
+                    logger.warning("Trying JavaScript Enter key simulation...")
+                    enter_script = """
+                    var element = arguments[0];
+                    var enterEvent = new KeyboardEvent('keydown', {
+                        key: 'Enter',
+                        code: 'Enter',
+                        keyCode: 13,
+                        which: 13,
+                        bubbles: true,
+                        cancelable: true
+                    });
+                    element.dispatchEvent(enterEvent);
+                    
+                    var enterUpEvent = new KeyboardEvent('keyup', {
+                        key: 'Enter',
+                        code: 'Enter',
+                        keyCode: 13,
+                        which: 13,
+                        bubbles: true,
+                        cancelable: true
+                    });
+                    element.dispatchEvent(enterUpEvent);
+                    return true;
+                    """
+                    
+                    PersonalWhatsAppClient._driver.execute_script(enter_script, message_box)
+                    logger.info("✅ Message sent using JavaScript Enter simulation")
+                    return True
+                    
+                except Exception as js_enter_error:
+                    logger.error(f"JavaScript Enter simulation failed: {js_enter_error}")
+                    logger.error("❌ All send methods failed")
+                    return False
             
         except Exception as e:
             logger.error(f"Error sending template message: {e}")
@@ -793,7 +934,7 @@ VisaT Team 🇹🇭"""
     
     def _process_detected_message(self, message) -> bool:
         """
-        Process a detected message by sending auto-reply template
+        Process a detected message by sending auto-reply template with proper formatting
         
         Args:
             message: DetectedMessage object from detection engine
@@ -806,64 +947,22 @@ VisaT Team 🇹🇭"""
             message.chat_element.click()
             time.sleep(2)
             
-            # Get the template message using new template system (plain text for Chrome compatibility)
+            # Get the template message using the default template with emojis (now properly supported)
             template_message = get_auto_reply_template(
-                template_type='plain',  # Use plain text template for Chrome/Selenium compatibility
+                template_type='default',  # Use default template with emojis - JavaScript can handle them
                 form_url=os.getenv('GOOGLE_FORM_URL', 'https://docs.google.com/forms/d/e/1FAIpQLScol3ZjPUuAueFf32s3-dHQiTE3oL1qmkDZGdt-YSqWffecdw/viewform'),
                 consultant_name=os.getenv('WHATSAPP_TEMPLATE_CONSULTANT_NAME', 'Slava')
             )
             
-            # Find the message input box with multiple selector strategies
-            message_box = None
-            input_selectors = [
-                'div[data-testid="conversation-compose-box-input"]',
-                'div[contenteditable="true"][data-tab="10"]',
-                'div[contenteditable="true"][role="textbox"]',
-                'div[data-testid="message-composer"]'
-            ]
+            # Use the enhanced JavaScript-based message sending
+            success = self._send_template_message(template_message)
             
-            for selector in input_selectors:
-                try:
-                    message_box = PersonalWhatsAppClient._driver.find_element(By.CSS_SELECTOR, selector)
-                    if message_box:
-                        break
-                except:
-                    continue
-            
-            if not message_box:
-                logger.error("Could not find message input box")
+            if success:
+                logger.info(f"✅ Sent auto-reply template to: {message.contact_name}")
+                return True
+            else:
+                logger.error(f"❌ Failed to send template to: {message.contact_name}")
                 return False
-            
-            # Clear any existing text and send the template
-            message_box.clear()
-            message_box.send_keys(template_message)
-            time.sleep(1)
-            
-            # Find and click send button with multiple strategies
-            send_button = None
-            send_selectors = [
-                'button[data-testid="compose-btn-send"]',
-                'span[data-testid="send"]',
-                'button[aria-label*="Send"]',
-                'button[title*="Send"]'
-            ]
-            
-            for selector in send_selectors:
-                try:
-                    send_button = PersonalWhatsAppClient._driver.find_element(By.CSS_SELECTOR, selector)
-                    if send_button and send_button.is_enabled():
-                        break
-                except:
-                    continue
-            
-            if not send_button:
-                logger.error("Could not find send button")
-                return False
-            
-            send_button.click()
-            
-            logger.info(f"✅ Sent auto-reply template to: {message.contact_name}")
-            return True
             
         except Exception as e:
             logger.error(f"Error processing detected message: {e}")

@@ -45,3 +45,7 @@ phonenumbers==8.13.22
 
 # Security
 cryptography==41.0.4
+
+# WhatsApp Personal Mode (Selenium)
+selenium==4.15.2
+webdriver-manager==4.0.1

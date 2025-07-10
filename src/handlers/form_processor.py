@@ -101,25 +101,47 @@ class FormProcessor:
             dict: Extracted prospect data
         """
         try:
-            # Handle different possible form data structures
-            responses = form_data.get('responses', form_data)
+            # Handle Google Forms Apps Script webhook format
+            if 'form_response' in form_data:
+                responses = form_data['form_response']
+            else:
+                responses = form_data
             
-            # Map form fields to prospect data
+            # Map form fields to prospect data with exact Google Forms field names
             prospect_data = {
-                'full_name': self._get_form_value(responses, ['full_name', 'name', 'Full Name']),
-                'email': self._get_form_value(responses, ['email', 'email_address', 'Email Address']),
-                'nationality': self._get_form_value(responses, ['nationality', 'Nationality']),
-                'current_location': self._get_form_value(responses, ['current_country', 'current_location', 'Current Country']),
+                'full_name': self._get_form_value(responses, [
+                    'Full Name', 'full_name', 'name'
+                ]),
+                'email': self._get_form_value(responses, [
+                    'Email Address', 'email', 'email_address'
+                ]),
+                'nationality': self._get_form_value(responses, [
+                    'Nationality', 'nationality'
+                ]),
+                'current_location': self._get_form_value(responses, [
+                    'Current Country', 'current_country', 'current_location'
+                ]),
                 'financial_status': self._parse_financial_status(responses),
-                'current_visa_type': self._get_form_value(responses, ['current_visa_type', 'visa_type', 'If you\'re currently in Thailand, what visa type do you hold?']),
-                'whatsapp_number': self._get_form_value(responses, ['whatsapp_number', 'whatsapp', 'WhatsApp Number (with country code)']),
-                'how_heard': self._get_form_value(responses, ['source', 'how_heard', 'Source']),
-                'additional_questions': self._get_form_value(responses, ['additional_questions', 'questions', 'comments'])
+                'current_visa_type': self._get_form_value(responses, [
+                    'If you\'re currently in Thailand, what visa type do you hold?',
+                    'current_visa_type', 'visa_type'
+                ]),
+                'whatsapp_number': self._get_form_value(responses, [
+                    'WhatsApp Number (with country code)', 
+                    'whatsapp_number', 'whatsapp'
+                ]),
+                'how_heard': self._get_form_value(responses, [
+                    'source', 'how_heard', 'Source'
+                ]),
+                'additional_questions': self._get_form_value(responses, [
+                    'additional_questions', 'questions', 'comments'
+                ])
             }
             
             # Validate required fields
             if not prospect_data['email'] or not prospect_data['full_name']:
-                logger.error("Missing required fields: email or full_name")
+                logger.error(f"Missing required fields: email='{prospect_data['email']}', full_name='{prospect_data['full_name']}'")
+                logger.error(f"Available form fields: {list(responses.keys())}")
                 return None
             
             logger.info(f"Extracted prospect data for {prospect_data['email']}")
@@ -155,10 +177,10 @@ class FormProcessor:
         Returns:
             bool: True if meets financial requirements
         """
-        # Look for financial status field
+        # Look for financial status field with exact Google Forms field name
         financial_keys = [
-            'financial_status',
             'Do you have more than 500k BTH in your bank account?',
+            'financial_status',
             'financial_requirement',
             'funds'
         ]
