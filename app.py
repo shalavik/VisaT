@@ -30,6 +30,7 @@ from src.integrations.gmail_client import GmailClient
 from src.integrations.whatsapp_client import WhatsAppClient
 from src.integrations.sheets_client import SheetsClient
 from src.integrations.calendly_client import CalendlyClient
+from src.integrations.sheets_monitor import SheetsMonitor
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -45,6 +46,9 @@ gmail_client = GmailClient()
 whatsapp_client = WhatsAppClient()
 sheets_client = SheetsClient()
 calendly_client = CalendlyClient()
+
+# Initialize the sheets monitor
+sheets_monitor = SheetsMonitor()
 
 @app.route('/')
 def health_check():
@@ -235,6 +239,26 @@ def test_email():
     except Exception as e:
         logger.error(f"Email test error: {e}")
         return jsonify({"error": "Test failed"}), 500
+
+@app.route('/api/test-follow-up', methods=['POST'])
+def test_follow_up():
+    """Test follow-up message functionality"""
+    try:
+        data = request.get_json()
+        phone = data.get('phone')
+        name = data.get('name', 'Test User')
+        qualified = data.get('qualified', True)
+        
+        if not phone:
+            return jsonify({"error": "Phone number required"}), 400
+        
+        # Test the complete follow-up flow
+        result = whatsapp_client.send_follow_up(phone, name, qualified)
+        return jsonify({"status": "tested", "result": result})
+        
+    except Exception as e:
+        logger.error(f"Follow-up test error: {e}")
+        return jsonify({"error": "Follow-up test failed"}), 500
 
 @app.route('/api/whatsapp-status', methods=['GET'])
 def whatsapp_status():
@@ -450,6 +474,121 @@ def whatsapp_test_simplified():
             "status": "error",
             "message": f"Test failed: {str(e)}"
         }), 500
+
+@app.route('/api/sheets-monitor/start', methods=['POST'])
+def start_sheets_monitoring():
+    """Start Google Sheets monitoring"""
+    try:
+        success = sheets_monitor.start_monitoring()
+        return jsonify({
+            "status": "success" if success else "failed",
+            "message": "Google Sheets monitoring started" if success else "Failed to start monitoring"
+        })
+    except Exception as e:
+        logger.error(f"Error starting sheets monitoring: {e}")
+        return jsonify({"error": "Failed to start sheets monitoring"}), 500
+
+@app.route('/api/sheets-monitor/stop', methods=['POST'])
+def stop_sheets_monitoring():
+    """Stop Google Sheets monitoring"""
+    try:
+        success = sheets_monitor.stop_monitoring()
+        return jsonify({
+            "status": "success" if success else "failed",
+            "message": "Google Sheets monitoring stopped" if success else "Failed to stop monitoring"
+        })
+    except Exception as e:
+        logger.error(f"Error stopping sheets monitoring: {e}")
+        return jsonify({"error": "Failed to stop sheets monitoring"}), 500
+
+@app.route('/api/sheets-monitor/status', methods=['GET'])
+def sheets_monitoring_status():
+    """Get Google Sheets monitoring status"""
+    try:
+        status = sheets_monitor.get_monitoring_status()
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error getting sheets monitoring status: {e}")
+        return jsonify({"error": "Failed to get monitoring status"}), 500
+
+@app.route('/api/sheets-monitor/process', methods=['POST'])
+def process_new_sheets_rows():
+    """Manually trigger processing of new sheet rows"""
+    try:
+        success = sheets_monitor.manual_process_new_rows()
+        return jsonify({
+            "status": "success" if success else "failed",
+            "message": "Manual processing completed" if success else "Failed to process rows"
+        })
+    except Exception as e:
+        logger.error(f"Error processing sheets rows: {e}")
+        return jsonify({"error": "Failed to process rows"}), 500
+
+@app.route('/api/sheets-monitor/process-row', methods=['POST'])
+def process_specific_row():
+    """Manually process a specific row for debugging"""
+    try:
+        data = request.get_json()
+        row_number = data.get('row_number')
+        
+        if not row_number:
+            return jsonify({"error": "Row number required"}), 400
+        
+        # Get sheet data
+        sheet_data = sheets_monitor._get_sheet_data()
+        
+        if row_number > len(sheet_data) or row_number < 1:
+            return jsonify({"error": f"Invalid row number. Sheet has {len(sheet_data)} rows"}), 400
+        
+        # Process the specific row (convert to 0-based index)
+        row_data = sheet_data[row_number - 1]
+        result = sheets_monitor._process_form_submission(row_data, row_number)
+        
+        return jsonify({
+            "status": "processed",
+            "row_number": row_number,
+            "row_data": row_data,
+            "result": result
+        })
+        
+    except Exception as e:
+        logger.error(f"Row processing error: {e}")
+        return jsonify({"error": "Row processing failed"}), 500
+
+@app.route('/api/sheets-monitor/reset', methods=['POST'])
+def reset_sheets_monitoring():
+    """Reset sheets monitor to reprocess recent submissions"""
+    try:
+        data = request.get_json() or {}
+        reprocess_last_n = data.get('reprocess_last_n', 5)  # Default to last 5 submissions
+        
+        # Get current sheet data
+        sheet_data = sheets_monitor._get_sheet_data()
+        current_rows = len(sheet_data)
+        
+        if current_rows == 0:
+            return jsonify({"error": "No data in sheet"}), 400
+        
+        # Reset to process last N rows
+        new_processed_row = max(0, current_rows - reprocess_last_n)
+        sheets_monitor.last_processed_row = new_processed_row
+        
+        logger.info(f"Reset sheets monitor: will reprocess rows {new_processed_row + 1} to {current_rows}")
+        
+        # Trigger immediate processing
+        sheets_monitor._check_for_new_submissions()
+        
+        return jsonify({
+            "status": "reset",
+            "previous_processed_row": current_rows,
+            "new_processed_row": new_processed_row,
+            "will_reprocess_rows": list(range(new_processed_row + 1, current_rows + 1)),
+            "message": f"Reset to reprocess last {reprocess_last_n} submissions"
+        })
+        
+    except Exception as e:
+        logger.error(f"Sheets monitor reset error: {e}")
+        return jsonify({"error": "Reset failed"}), 500
 
 @app.errorhandler(404)
 def not_found(error):
