@@ -409,40 +409,131 @@ Slava - Thailand Visa Specialist"""
     
     def send_follow_up(self, to_phone, name, qualified=True):
         """
-        Send follow-up message after form submission
+        Send follow-up message after form qualification
         
         Args:
-            to_phone (str): Recipient phone number
-            name (str): Prospect name
-            qualified (bool): Whether prospect is qualified
+            to_phone (str): Phone number to send to
+            name (str): Client name
+            qualified (bool): Whether client is qualified
             
         Returns:
-            dict: Result of message sending
+            dict: Send result
         """
-        if qualified:
-            message = f"""🎉 Great news, {name}!
-
-You've been pre-qualified for Thailand visa consultation! 
-
-📧 Check your email for detailed next steps and booking information.
-
-Our team is excited to help you with your Thailand journey! 🇹🇭
-
-Best regards,
-VisaT Team"""
-        else:
-            message = f"""Hi {name},
-
-Thank you for your interest in Thailand visa services.
-
-📧 Please check your email for helpful resources and information about visa requirements.
-
-Feel free to reach out when you're ready to explore Thailand visa options in the future.
-
-Best regards,
-VisaT Team 🇹🇭"""
+        try:
+            if not qualified:
+                logger.info(f"Client {name} not qualified, skipping WhatsApp follow-up")
+                return {"status": "skipped", "reason": "not_qualified"}
+            
+            # Get the follow-up template
+            from ..utils.whatsapp_templates import get_follow_up_template
+            import os
+            
+            template_message = get_follow_up_template(
+                name=name,
+                calendly_link=os.getenv('CALENDLY_BOOKING_URL', 'https://calendly.com/slavaidler/30min'),
+                consultant_name=os.getenv('WHATSAPP_TEMPLATE_CONSULTANT_NAME', 'Slava')
+            )
+            
+            # For personal mode, we need to find the chat and send the message
+            success = self._send_personal_follow_up(to_phone, template_message)
+            
+            if success:
+                logger.info(f"✅ Sent follow-up message to qualified client: {name} ({to_phone})")
+                return {"status": "sent", "to": to_phone, "name": name}
+            else:
+                logger.error(f"❌ Failed to send follow-up message to: {name} ({to_phone})")
+                return {"status": "failed", "to": to_phone, "name": name}
+                
+        except Exception as e:
+            logger.error(f"Error sending follow-up to {name}: {e}")
+            return {"status": "error", "error": str(e), "to": to_phone, "name": name}
+    
+    def _send_personal_follow_up(self, phone_number, message):
+        """
+        Send follow-up message via personal WhatsApp Web
         
-        return self.send_message(to_phone, message)
+        Args:
+            phone_number (str): Phone number
+            message (str): Message to send
+            
+        Returns:
+            bool: Success status
+        """
+        try:
+            if not PersonalWhatsAppClient._driver:
+                logger.error("WhatsApp driver not available for follow-up")
+                return False
+            
+            # Clean phone number (remove + and spaces)
+            clean_phone = phone_number.replace('+', '').replace(' ', '').replace('-', '')
+            
+            # Navigate to chat using WhatsApp Web URL format
+            chat_url = f"https://web.whatsapp.com/send?phone={clean_phone}"
+            
+            logger.info(f"Opening WhatsApp chat for follow-up: {phone_number}")
+            PersonalWhatsAppClient._driver.get(chat_url)
+            
+            # Wait for chat to load
+            time.sleep(5)  # Increased wait time
+            
+            # Check if we're in a chat (not contact not found)
+            try:
+                # Look for contact not found indicators
+                not_found_selectors = [
+                    'div[data-testid="conversation-info-phone-number-not-found"]',
+                    'div:contains("Phone number not on WhatsApp")',
+                    'div:contains("Contact not found")'
+                ]
+                
+                for selector in not_found_selectors:
+                    try:
+                        PersonalWhatsAppClient._driver.find_element(By.CSS_SELECTOR, selector)
+                        logger.warning(f"Contact not found on WhatsApp: {phone_number}")
+                        return False
+                    except:
+                        continue
+                        
+            except Exception:
+                pass  # Contact found, continue
+            
+            # Additional check: ensure we're in a chat interface
+            chat_indicators = [
+                'div[data-testid="conversation-compose-box-input"]',
+                'div[contenteditable="true"][data-tab="10"]',
+                'div[data-testid="conversation-header"]'
+            ]
+            
+            chat_found = False
+            for indicator in chat_indicators:
+                try:
+                    element = PersonalWhatsAppClient._driver.find_element(By.CSS_SELECTOR, indicator)
+                    if element and element.is_displayed():
+                        chat_found = True
+                        break
+                except:
+                    continue
+            
+            if not chat_found:
+                logger.error(f"Chat interface not found for {phone_number}. Trying to navigate back to main WhatsApp.")
+                # Try to navigate back to main WhatsApp and retry
+                PersonalWhatsAppClient._driver.get("https://web.whatsapp.com")
+                time.sleep(3)
+                PersonalWhatsAppClient._driver.get(chat_url)
+                time.sleep(5)
+            
+            # Send the follow-up message using the same method as template
+            success = self._send_template_message(message)
+            
+            if success:
+                logger.info(f"Follow-up message sent successfully to {phone_number}")
+                return True
+            else:
+                logger.error(f"Failed to send follow-up message to {phone_number}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error in _send_personal_follow_up: {e}")
+            return False
     
     def _check_login_status(self):
         """Check if WhatsApp Web is actually logged in by looking for UI elements"""
@@ -995,7 +1086,7 @@ VisaT Team 🇹🇭"""
         """
         logger.info("Webhook verification called on personal client (no-op)")
         return challenge if verify_token else None
-
+    
     @classmethod
     def get_instance(cls):
         """Get the singleton instance"""

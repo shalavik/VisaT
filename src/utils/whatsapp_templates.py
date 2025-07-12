@@ -221,3 +221,37 @@ def get_auto_reply_template(template_type: str = None, **kwargs) -> str:
         str: Formatted template
     """
     return template_manager.get_auto_reply_template(template_type, **kwargs) 
+
+def get_follow_up_template(name, calendly_link, consultant_name="Slava"):
+    """
+    Get follow-up template for qualified prospects with Calendly booking link
+    
+    Args:
+        name (str): Client name
+        calendly_link (str): Calendly booking URL
+        consultant_name (str): Consultant name
+        
+    Returns:
+        str: Formatted follow-up template
+    """
+    template = f"""🎉 Great news, {name}!
+
+You've been pre-qualified for Thailand visa consultation!
+
+📧 Check your email for detailed next steps.
+
+📅 Ready to move forward? Book your consultation now:
+👉 {calendly_link}
+
+Our Thailand visa specialist will discuss:
+✅ Your personalized visa strategy
+✅ Required documents & timeline
+✅ Financial planning guidance
+✅ Complete application walkthrough
+
+Looking forward to helping you with your Thailand journey! 🇹🇭
+
+Best regards,
+{consultant_name} - Thailand Visa Specialist"""
+    
+    return template 
