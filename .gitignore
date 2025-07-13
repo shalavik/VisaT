@@ -242,4 +242,4 @@ dmypy.json
 chrome-session/
 chrome-session-*/
 *.crx
-*.pem 
+*.pem config/google_service_account.json
