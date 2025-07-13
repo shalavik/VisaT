@@ -160,3 +160,117 @@ class SheetsClientFixed:
         except Exception as e:
             logger.error(f"Failed to get data rows: {e}")
             return [] 
+
+    def append_booking_row(self, sheet_id: str, row_data: list) -> bool:
+        """
+        Append a booking row to the Calendly bookings sheet.
+        
+        Args:
+            sheet_id: Google Sheet ID for Calendly bookings
+            row_data: List of values to append as a row
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(f"📊 Appending booking data to sheet: {sheet_id}")
+            
+            # Prepare the request body
+            body = {
+                "values": [row_data]
+            }
+            
+            # Append to the sheet
+            result = self.service.spreadsheets().values().append(
+                spreadsheetId=sheet_id,
+                range="A1",  # Start from A1, will append to next available row
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body=body
+            ).execute()
+            
+            # Check if the operation was successful
+            updates = result.get('updates', {})
+            updated_rows = updates.get('updatedRows', 0)
+            
+            if updated_rows > 0:
+                logger.info(f"✅ Successfully appended {updated_rows} row(s) to booking sheet")
+                return True
+            else:
+                logger.warning("⚠️ No rows were updated in booking sheet")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error appending booking row: {e}")
+            return False
+    
+    def create_booking_sheet_headers(self, sheet_id: str) -> bool:
+        """
+        Create headers for the Calendly bookings sheet if they don't exist.
+        
+        Args:
+            sheet_id: Google Sheet ID for Calendly bookings
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            headers = [
+                "Timestamp",
+                "Invitee Name", 
+                "Invitee Email",
+                "Event Type",
+                "Start Time (UTC)",
+                "End Time (UTC)", 
+                "Start Time (Thai)",
+                "End Time (Thai)",
+                "Timezone",
+                "Status",
+                "Calendly Event ID"
+            ]
+            
+            # Check if headers already exist
+            existing_data = self.get_sheet_data(sheet_id, "A1:K1")
+            
+            if existing_data and len(existing_data) > 0 and len(existing_data[0]) > 0:
+                logger.info("📋 Booking sheet headers already exist")
+                return True
+            
+            # Create headers
+            body = {
+                "values": [headers]
+            }
+            
+            result = self.service.spreadsheets().values().update(
+                spreadsheetId=sheet_id,
+                range="A1:K1",
+                valueInputOption="RAW",
+                body=body
+            ).execute()
+            
+            logger.info("✅ Created booking sheet headers")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error creating booking sheet headers: {e}")
+            return False
+    
+    def get_booking_sheet_data(self, sheet_id: str, limit: int = 100) -> list:
+        """
+        Get recent booking data from the Calendly bookings sheet.
+        
+        Args:
+            sheet_id: Google Sheet ID for Calendly bookings
+            limit: Maximum number of rows to retrieve
+            
+        Returns:
+            list: List of booking rows
+        """
+        try:
+            # Get data starting from row 2 (skip headers)
+            range_name = f"A2:K{limit + 1}"
+            return self.get_sheet_data(sheet_id, range_name)
+            
+        except Exception as e:
+            logger.error(f"❌ Error retrieving booking data: {e}")
+            return [] 

@@ -590,6 +590,157 @@ def reset_sheets_monitoring():
         logger.error(f"Sheets monitor reset error: {e}")
         return jsonify({"error": "Reset failed"}), 500
 
+# =============================================================================
+# CALENDLY WEBHOOK INTEGRATION
+# =============================================================================
+
+@app.route('/api/calendly/webhook', methods=['POST'])
+def calendly_webhook():
+    """Handle Calendly webhook events"""
+    try:
+        from src.integrations.calendly_webhook import CalendlyWebhookProcessor
+        
+        # Get raw body for signature verification
+        raw_body = request.get_data()
+        
+        # Get signature from headers
+        signature = request.headers.get('X-Calendly-Signature', '')
+        
+        # Parse JSON payload
+        payload = request.get_json()
+        
+        if not payload:
+            return jsonify({
+                "status": "error",
+                "message": "No JSON payload received"
+            }), 400
+        
+        # Process webhook
+        processor = CalendlyWebhookProcessor()
+        result = processor.process_webhook(payload, signature, raw_body)
+        
+        # Return appropriate status code
+        if result.get("status") == "success":
+            return jsonify(result), 200
+        elif result.get("status") == "ignored":
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"Calendly webhook error: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"Webhook processing failed: {str(e)}"
+        }), 500
+
+@app.route('/api/calendly/status', methods=['GET'])
+def calendly_status():
+    """Check Calendly integration status"""
+    try:
+        from src.integrations.calendly_webhook import CalendlyWebhookProcessor
+        
+        processor = CalendlyWebhookProcessor()
+        result = processor.test_webhook_processing()
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"Calendly status check error: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"Status check failed: {str(e)}"
+        }), 500
+
+@app.route('/api/calendly/test', methods=['POST'])
+def test_calendly():
+    """Test Calendly webhook processing"""
+    try:
+        from src.integrations.calendly_webhook import CalendlyWebhookProcessor
+        
+        # Get test data from request or use default
+        test_data = request.get_json() if request.is_json else None
+        
+        processor = CalendlyWebhookProcessor()
+        result = processor.test_webhook_processing(test_data)
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"Calendly test error: {e}")
+        return jsonify({
+            "status": "error", 
+            "message": f"Test failed: {str(e)}"
+        }), 500
+
+@app.route('/api/calendly/bookings', methods=['GET'])
+def get_calendly_bookings():
+    """Get recent Calendly bookings"""
+    try:
+        from src.integrations.sheets_client_fixed import SheetsClientFixed
+        import os
+        
+        sheet_id = os.getenv("CALENDLY_SHEET_ID")
+        if not sheet_id:
+            return jsonify({
+                "status": "error",
+                "message": "Calendly sheet ID not configured"
+            }), 400
+        
+        # Get limit from query params
+        limit = request.args.get('limit', 50, type=int)
+        
+        sheets_client = SheetsClientFixed()
+        bookings = sheets_client.get_booking_sheet_data(sheet_id, limit)
+        
+        return jsonify({
+            "status": "success",
+            "bookings": bookings,
+            "count": len(bookings)
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Get bookings error: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to retrieve bookings: {str(e)}"
+        }), 500
+
+@app.route('/api/calendly/setup-headers', methods=['POST'])
+def setup_calendly_headers():
+    """Setup headers for Calendly bookings sheet"""
+    try:
+        from src.integrations.sheets_client_fixed import SheetsClientFixed
+        import os
+        
+        sheet_id = os.getenv("CALENDLY_SHEET_ID")
+        if not sheet_id:
+            return jsonify({
+                "status": "error",
+                "message": "Calendly sheet ID not configured"
+            }), 400
+        
+        sheets_client = SheetsClientFixed()
+        success = sheets_client.create_booking_sheet_headers(sheet_id)
+        
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": "Booking sheet headers created successfully"
+            }), 200
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Failed to create booking sheet headers"
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"Setup headers error: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to setup headers: {str(e)}"
+        }), 500
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({"error": "Endpoint not found"}), 404

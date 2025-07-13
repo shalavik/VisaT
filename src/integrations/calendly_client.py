@@ -1,183 +1,153 @@
-#!/usr/bin/env python3
 """
-Calendly API Client
-Handles appointment booking integration
+Calendly API Client for webhook handling and event fetching.
+Handles HMAC signature verification and API interactions.
 """
 
 import os
+import hmac
+import hashlib
 import requests
 import logging
+from typing import Dict, Optional
+import time
 
 logger = logging.getLogger(__name__)
 
+class CalendlyAPIError(Exception):
+    """Exception raised for Calendly API errors."""
+    pass
+
 class CalendlyClient:
-    """Calendly API client for appointment booking"""
+    """
+    Calendly API client for webhook verification and event fetching.
+    """
     
     def __init__(self):
-        self.access_token = os.getenv('CALENDLY_ACCESS_TOKEN')
-        self.event_type_uuid = os.getenv('CALENDLY_EVENT_TYPE_UUID')
-        self.static_link = os.getenv('CALENDLY_STATIC_LINK')
-        self.api_base = 'https://api.calendly.com'
+        self.pat = os.getenv("CALENDLY_PAT")
+        self.webhook_secret = os.getenv("CALENDLY_WEBHOOK_SECRET")
         
-        if not self.access_token:
-            logger.warning("Calendly access token not configured")
+        if not self.pat:
+            raise ValueError("CALENDLY_PAT environment variable is required")
+        if not self.webhook_secret:
+            raise ValueError("CALENDLY_WEBHOOK_SECRET environment variable is required")
+        
+        # Setup session with connection pooling
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {self.pat}",
+            "Content-Type": "application/json"
+        })
+        
+        logger.info("✅ Calendly client initialized successfully")
     
-    def get_booking_link(self, prospect_data=None):
+    def verify_webhook_signature(self, raw_body: bytes, signature: str) -> bool:
         """
-        Get Calendly booking link
+        Verify webhook signature using HMAC-SHA256.
         
         Args:
-            prospect_data (dict, optional): Prospect information for personalization
+            raw_body: Raw request body as bytes
+            signature: Signature from X-Calendly-Signature header
             
         Returns:
-            str: Calendly booking link
+            bool: True if signature is valid, False otherwise
         """
-        # For now, return static link
-        # In future, could be personalized with prospect data
-        return self.static_link or "https://calendly.com/visat-consultation"
+        try:
+            if not signature:
+                logger.warning("❌ No signature provided in webhook")
+                return False
+            
+            # Calculate expected signature
+            expected_signature = hmac.new(
+                self.webhook_secret.encode('utf-8'),
+                raw_body,
+                hashlib.sha256
+            ).hexdigest()
+            
+            # Use compare_digest for timing attack protection
+            is_valid = hmac.compare_digest(expected_signature, signature)
+            
+            if is_valid:
+                logger.info("✅ Webhook signature verified successfully")
+            else:
+                logger.warning("❌ Webhook signature verification failed")
+                
+            return is_valid
+            
+        except Exception as e:
+            logger.error(f"❌ Error verifying webhook signature: {e}")
+            return False
     
-    def create_scheduled_event(self, prospect_email, prospect_name):
+    def fetch_event_details(self, event_uri: str, max_retries: int = 3) -> Dict:
         """
-        Create a scheduled event (requires webhook or advanced integration)
+        Fetch full event details from Calendly API with retry logic.
         
         Args:
-            prospect_email (str): Prospect email
-            prospect_name (str): Prospect name
+            event_uri: URI of the event to fetch
+            max_retries: Maximum number of retry attempts
             
         Returns:
-            dict: Result of operation
+            dict: Event details from Calendly API
+            
+        Raises:
+            CalendlyAPIError: If API request fails after retries
         """
-        try:
-            if not self.access_token:
-                return {
-                    "status": "failed",
-                    "error": "Calendly access token not configured",
-                    "booking_link": self.get_booking_link()
-                }
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"📡 Fetching event details from: {event_uri}")
+                
+                response = self.session.get(event_uri, timeout=10)
+                response.raise_for_status()
+                
+                data = response.json()
+                event_details = data.get("resource", {})
+                
+                if not event_details:
+                    raise CalendlyAPIError("No event resource found in API response")
+                
+                logger.info(f"✅ Successfully fetched event details: {event_details.get('name', 'Unknown Event')}")
+                return event_details
+                
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"⚠️ API request failed (attempt {attempt + 1}/{max_retries}): {e}")
+                
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 1s, 2s, 4s
+                    wait_time = 2 ** attempt
+                    logger.info(f"⏳ Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    raise CalendlyAPIError(f"Failed to fetch event details after {max_retries} attempts: {e}")
             
-            # Note: Direct event creation requires specific event type setup
-            # For most use cases, directing users to booking link is sufficient
-            
-            logger.info(f"Booking link provided for {prospect_email}")
-            return {
-                "status": "success",
-                "message": "Booking link provided",
-                "booking_link": self.get_booking_link(),
-                "instructions": "Please use the booking link to schedule your consultation"
-            }
-            
-        except Exception as e:
-            logger.error(f"Calendly operation failed: {e}")
-            return {
-                "status": "failed",
-                "error": str(e),
-                "booking_link": self.get_booking_link()
-            }
+            except Exception as e:
+                logger.error(f"❌ Unexpected error fetching event details: {e}")
+                raise CalendlyAPIError(f"Unexpected error: {e}")
     
-    def get_user_info(self):
+    def test_api_connection(self) -> bool:
         """
-        Get Calendly user information
+        Test API connection and authentication.
         
         Returns:
-            dict: User information or error
+            bool: True if connection is successful, False otherwise
         """
         try:
-            if not self.access_token:
-                return {"status": "failed", "error": "Access token not configured"}
+            logger.info("🔍 Testing Calendly API connection...")
             
-            headers = {
-                'Authorization': f'Bearer {self.access_token}',
-                'Content-Type': 'application/json'
-            }
+            # Test with user endpoint
+            response = self.session.get("https://api.calendly.com/users/me", timeout=10)
+            response.raise_for_status()
             
-            response = requests.get(f'{self.api_base}/users/me', headers=headers)
+            user_data = response.json()
+            user_name = user_data.get("resource", {}).get("name", "Unknown")
             
-            if response.status_code == 200:
-                user_data = response.json()
-                logger.info("Calendly user info retrieved successfully")
-                return {
-                    "status": "success",
-                    "user": user_data.get('resource', {})
-                }
-            else:
-                logger.error(f"Calendly API error: {response.status_code}")
-                return {
-                    "status": "failed",
-                    "error": f"API error: {response.status_code}"
-                }
-                
+            logger.info(f"✅ Calendly API connection successful. User: {user_name}")
+            return True
+            
         except Exception as e:
-            logger.error(f"Failed to get Calendly user info: {e}")
-            return {"status": "failed", "error": str(e)}
+            logger.error(f"❌ Calendly API connection failed: {e}")
+            return False
     
-    def get_event_types(self):
-        """
-        Get available event types
-        
-        Returns:
-            dict: Event types or error
-        """
-        try:
-            if not self.access_token:
-                return {"status": "failed", "error": "Access token not configured"}
-            
-            # First get user info to get user URI
-            user_info = self.get_user_info()
-            if user_info.get('status') != 'success':
-                return user_info
-            
-            user_uri = user_info['user'].get('uri')
-            if not user_uri:
-                return {"status": "failed", "error": "User URI not found"}
-            
-            headers = {
-                'Authorization': f'Bearer {self.access_token}',
-                'Content-Type': 'application/json'
-            }
-            
-            params = {'user': user_uri}
-            response = requests.get(f'{self.api_base}/event_types', headers=headers, params=params)
-            
-            if response.status_code == 200:
-                event_data = response.json()
-                logger.info("Calendly event types retrieved successfully")
-                return {
-                    "status": "success",
-                    "event_types": event_data.get('collection', [])
-                }
-            else:
-                logger.error(f"Calendly API error: {response.status_code}")
-                return {
-                    "status": "failed",
-                    "error": f"API error: {response.status_code}"
-                }
-                
-        except Exception as e:
-            logger.error(f"Failed to get Calendly event types: {e}")
-            return {"status": "failed", "error": str(e)}
-    
-    def test_connection(self):
-        """
-        Test Calendly API connection
-        
-        Returns:
-            dict: Connection test result
-        """
-        try:
-            result = self.get_user_info()
-            if result.get('status') == 'success':
-                return {
-                    "status": "success",
-                    "message": "Calendly connection successful",
-                    "user_name": result.get('user', {}).get('name', 'Unknown')
-                }
-            else:
-                return {
-                    "status": "failed",
-                    "message": "Calendly connection failed",
-                    "error": result.get('error', 'Unknown error')
-                }
-                
-        except Exception as e:
-            logger.error(f"Calendly connection test failed: {e}")
-            return {"status": "failed", "error": str(e)} 
+    def close(self):
+        """Close the HTTP session."""
+        if hasattr(self, 'session'):
+            self.session.close()
+            logger.info("🔒 Calendly client session closed") 
