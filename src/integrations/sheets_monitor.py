@@ -151,7 +151,7 @@ class SheetsMonitor:
             logger.info(f"📊 Qualification result for {prospect_data.get('email')}: {qualified}")
             
             # Send email response
-            calendly_link = self.calendly_client.get_booking_link(prospect_data) if qualified else None
+            calendly_link = "https://calendly.com/slavaidler/30min" if qualified else None
             email_result = self.gmail_client.send_qualification_email(
                 prospect_data, 
                 qualified=qualified, 
@@ -191,48 +191,46 @@ class SheetsMonitor:
     def _extract_prospect_data_from_row(self, row_data, row_number):
         """Extract prospect data from a Google Sheets row"""
         try:
-            # Google Forms typically creates columns in this order:
-            # [Timestamp, Name, Email, Nationality, Location, Financial Status, WhatsApp, etc.]
+            # Expected column structure based on your Google Form:
+            # [0] Timestamp, [1] Name, [2] Email, [3] Nationality, [4] Current Country, 
+            # [5] Financial Status (500k THB), [6] Visa Type, [7] WhatsApp Number
             
-            if len(row_data) < 4:  # Need at least basic info
+            if len(row_data) < 7:  # Need at least basic info
                 logger.warning(f"Row {row_number} has insufficient data: {len(row_data)} columns")
+                logger.debug(f"Row data: {row_data}")
                 return None
-            
-            # Map common Google Forms column patterns
+
+            # Direct mapping based on known column positions
             prospect_data = {}
             
-            # Try to extract data based on common patterns
-            for i, cell_value in enumerate(row_data):
-                cell_value = str(cell_value).strip() if cell_value else ""
+            try:
+                # Column 1: Full Name
+                prospect_data['full_name'] = str(row_data[1]).strip() if len(row_data) > 1 and row_data[1] else ""
                 
-                # Column 0: Timestamp (skip)
-                if i == 0:
-                    continue
+                # Column 2: Email
+                prospect_data['email'] = str(row_data[2]).strip() if len(row_data) > 2 and row_data[2] else ""
                 
-                # Column 1: Usually full name
-                elif i == 1 and cell_value and not prospect_data.get('full_name'):
-                    prospect_data['full_name'] = cell_value
+                # Column 3: Nationality  
+                prospect_data['nationality'] = str(row_data[3]).strip() if len(row_data) > 3 and row_data[3] else ""
                 
-                # Look for email pattern
-                elif '@' in cell_value and '.' in cell_value and not prospect_data.get('email'):
-                    prospect_data['email'] = cell_value
+                # Column 4: Current Location
+                prospect_data['current_location'] = str(row_data[4]).strip() if len(row_data) > 4 and row_data[4] else ""
                 
-                # Look for phone number pattern
-                elif ('+' in cell_value or cell_value.replace(' ', '').replace('-', '').isdigit()) and len(cell_value.replace(' ', '').replace('-', '').replace('+', '')) >= 8:
-                    if not prospect_data.get('whatsapp_number'):
-                        prospect_data['whatsapp_number'] = cell_value
+                # Column 5: Financial Status (Yes/No for 500k THB)
+                financial_value = str(row_data[5]).strip().lower() if len(row_data) > 5 and row_data[5] else "no"
+                prospect_data['financial_status'] = financial_value in ['yes', 'true', '1']
                 
-                # Look for nationality/country
-                elif i >= 2 and cell_value and len(cell_value) > 2 and not cell_value.replace(' ', '').isdigit():
-                    if not prospect_data.get('nationality') and any(country in cell_value.lower() for country in ['spain', 'usa', 'uk', 'germany', 'france', 'italy', 'thailand', 'singapore', 'australia', 'canada', 'afghanistan', 'pakistan']):
-                        prospect_data['nationality'] = cell_value
-                    elif not prospect_data.get('current_location'):
-                        prospect_data['current_location'] = cell_value
+                # Column 6: Current Visa Type (optional)
+                prospect_data['current_visa_type'] = str(row_data[6]).strip() if len(row_data) > 6 and row_data[6] else ""
                 
-                # Look for financial status
-                elif cell_value.lower() in ['yes', 'no', 'true', 'false']:
-                    if not prospect_data.get('financial_status'):
-                        prospect_data['financial_status'] = cell_value.lower() in ['yes', 'true']
+                # Column 7: WhatsApp Number
+                prospect_data['whatsapp_number'] = str(row_data[7]).strip() if len(row_data) > 7 and row_data[7] else ""
+                
+                logger.debug(f"Mapped data for row {row_number}: {prospect_data}")
+                
+            except (IndexError, ValueError) as e:
+                logger.error(f"Error mapping row data for row {row_number}: {e}")
+                return None
             
             # Validate required fields
             if not prospect_data.get('email') or not prospect_data.get('full_name'):

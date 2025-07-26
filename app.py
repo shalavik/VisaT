@@ -31,6 +31,8 @@ from src.integrations.whatsapp_client import WhatsAppClient
 from src.integrations.sheets_client import SheetsClient
 from src.integrations.calendly_client import CalendlyClient
 from src.integrations.sheets_monitor import SheetsMonitor
+from src.integrations.calendly_poller import CalendlyPoller
+from src.integrations.calendly_poller import CalendlyPoller
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -39,6 +41,7 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
 # Initialize components
 contact_handler = ContactHandler()
 form_processor = FormProcessor()
+calendly_poller = CalendlyPoller()
 qualification_engine = QualificationEngine()
 
 # Initialize integrations
@@ -49,6 +52,77 @@ calendly_client = CalendlyClient()
 
 # Initialize the sheets monitor
 sheets_monitor = SheetsMonitor()
+
+# Add after the existing imports
+from src.integrations.calendly_poller import CalendlyPoller
+
+# Add after other global instances (near where form_processor is defined)
+calendly_poller = CalendlyPoller()
+
+# Calendly Polling API Endpoints
+@app.route('/api/calendly/poll/start', methods=['POST'])
+def start_calendly_polling():
+    """Start Calendly polling (every 5 minutes)"""
+    try:
+        calendly_poller.start_polling()
+        return jsonify({
+            "status": "success",
+            "message": "Calendly polling started (every 5 minutes)"
+        })
+    except Exception as e:
+        logger.error(f"Failed to start Calendly polling: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/calendly/poll/stop', methods=['POST'])
+def stop_calendly_polling():
+    """Stop Calendly polling"""
+    try:
+        calendly_poller.stop_polling()
+        return jsonify({
+            "status": "success",
+            "message": "Calendly polling stopped"
+        })
+    except Exception as e:
+        logger.error(f"Failed to stop Calendly polling: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/calendly/poll/status', methods=['GET'])
+def get_calendly_polling_status():
+    """Get Calendly polling status"""
+    try:
+        status = calendly_poller.get_status()
+        return jsonify({
+            "status": "success",
+            "data": status
+        })
+    except Exception as e:
+        logger.error(f"Failed to get Calendly polling status: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/calendly/poll', methods=['POST'])
+def manual_calendly_poll():
+    """Manually trigger Calendly polling"""
+    try:
+        result = calendly_poller.manual_poll()
+        return jsonify({
+            "status": "success",
+            "data": result
+        })
+    except Exception as e:
+        logger.error(f"Failed to manually poll Calendly: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 @app.route('/')
 def health_check():
@@ -146,20 +220,77 @@ def facebook_webhook():
         logger.error(f"Facebook webhook error: {e}")
         return jsonify({"error": "Processing failed"}), 500
 
+def map_form_data(raw_data):
+    """Map Google Forms field names to expected keys"""
+    try:
+        mapped_data = {}
+        
+        # Define field mappings
+        field_mappings = {
+            'Your Full Name (as on passport)': 'name',
+            'Your Full Name': 'name',  # Alternative
+            'Your Email Address': 'email',
+            'Email Address': 'email',  # Alternative
+            'Your Nationality': 'nationality',
+            'Nationality': 'nationality',  # Alternative
+            'Country of Current': 'current_location',
+            'Current Country': 'current_location',  # Alternative
+            'Do you have more than 500,000 THB': 'financial_status',
+            'Do you have more than 500k BTH in your bank account?': 'financial_status',  # Alternative
+            'If you are currently in Thailand': 'current_visa_type',
+            'Your WhatsApp Number (include country code)': 'whatsapp_number',
+            'Your WhatsApp Number': 'whatsapp_number',  # Alternative
+            'WhatsApp Number (with country code)': 'whatsapp_number'  # Alternative
+        }
+        
+        # Map fields
+        for form_field, value in raw_data.items():
+            if form_field in field_mappings:
+                mapped_key = field_mappings[form_field]
+                mapped_data[mapped_key] = value
+            else:
+                # Keep unmapped fields as-is
+                mapped_data[form_field] = value
+        
+        # Convert financial status to boolean
+        if 'financial_status' in mapped_data:
+            financial_answer = str(mapped_data['financial_status']).lower()
+            mapped_data['financial_status'] = financial_answer in ['yes', 'true', '1', 'อยู่']
+        
+        # Ensure we have required fields
+        if 'email' not in mapped_data:
+            mapped_data['email'] = 'unknown'
+        
+        if 'name' not in mapped_data:
+            mapped_data['name'] = mapped_data.get('email', 'Anonymous')
+        
+        logger.info(f"📋 Mapped form data: {mapped_data}")
+        return mapped_data
+        
+    except Exception as e:
+        logger.error(f"Error mapping form data: {e}")
+        return raw_data
+
 @app.route('/webhook/forms', methods=['POST'])
 def forms_webhook():
     """Google Forms webhook endpoint"""
     try:
-        data = request.get_json()
-        logger.info(f"Forms webhook received: {data}")
+        raw_data = request.get_json()
+        logger.info(f"📋 Forms webhook received raw data: {raw_data}")
+        
+        # Map form field names to expected keys
+        mapped_data = map_form_data(raw_data)
         
         # Process form submission
-        result = form_processor.process_submission(data)
+        result = form_processor.process_form_submission(mapped_data)
         
+        logger.info(f"📊 Form processing result: {result}")
         return jsonify({"status": "received", "result": result})
         
     except Exception as e:
         logger.error(f"Forms webhook error: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return jsonify({"error": "Processing failed"}), 500
 
 @app.route('/api/qualify', methods=['POST'])
@@ -740,15 +871,6 @@ def setup_calendly_headers():
             "status": "error",
             "message": f"Failed to setup headers: {str(e)}"
         }), 500
-
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({"error": "Endpoint not found"}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    logger.error(f"Internal server error: {error}")
-    return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == '__main__':
     host = os.getenv('HOST', '0.0.0.0')

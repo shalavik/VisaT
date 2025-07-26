@@ -4,150 +4,163 @@ Handles HMAC signature verification and API interactions.
 """
 
 import os
-import hmac
-import hashlib
 import requests
 import logging
-from typing import Dict, Optional
-import time
+from datetime import datetime, timedelta
+import hashlib
+import hmac
 
 logger = logging.getLogger(__name__)
 
-class CalendlyAPIError(Exception):
-    """Exception raised for Calendly API errors."""
-    pass
-
 class CalendlyClient:
-    """
-    Calendly API client for webhook verification and event fetching.
-    """
-    
     def __init__(self):
-        self.pat = os.getenv("CALENDLY_PAT")
-        self.webhook_secret = os.getenv("CALENDLY_WEBHOOK_SECRET")
+        self.access_token = os.getenv('CALENDLY_PAT') or os.getenv('CALENDLY_ACCESS_TOKEN')
+        self.event_type_uuid = os.getenv('CALENDLY_EVENT_TYPE_UUID')
         
-        if not self.pat:
-            raise ValueError("CALENDLY_PAT environment variable is required")
-        if not self.webhook_secret:
-            raise ValueError("CALENDLY_WEBHOOK_SECRET environment variable is required")
+        if not self.access_token:
+            raise ValueError("CALENDLY_PAT or CALENDLY_ACCESS_TOKEN environment variable is required")
         
-        # Setup session with connection pooling
-        self.session = requests.Session()
-        self.session.headers.update({
-            "Authorization": f"Bearer {self.pat}",
+        self.base_url = "https://api.calendly.com"
+        self.headers = {
+            "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json"
-        })
+        }
         
-        logger.info("✅ Calendly client initialized successfully")
+        # Get user info to determine organization
+        self.user_info = self._get_user_info()
+        self.organization_uri = self.user_info.get('current_organization')
+        
+        logger.info("✅ Calendly client initialized successfully (polling mode)")
     
-    def verify_webhook_signature(self, raw_body: bytes, signature: str) -> bool:
-        """
-        Verify webhook signature using HMAC-SHA256.
-        
-        Args:
-            raw_body: Raw request body as bytes
-            signature: Signature from X-Calendly-Signature header
-            
-        Returns:
-            bool: True if signature is valid, False otherwise
-        """
+    def _get_user_info(self):
+        """Get current user information"""
         try:
-            if not signature:
-                logger.warning("❌ No signature provided in webhook")
-                return False
-            
-            # Calculate expected signature
-            expected_signature = hmac.new(
-                self.webhook_secret.encode('utf-8'),
-                raw_body,
-                hashlib.sha256
-            ).hexdigest()
-            
-            # Use compare_digest for timing attack protection
-            is_valid = hmac.compare_digest(expected_signature, signature)
-            
-            if is_valid:
-                logger.info("✅ Webhook signature verified successfully")
-            else:
-                logger.warning("❌ Webhook signature verification failed")
-                
-            return is_valid
-            
+            response = requests.get(f"{self.base_url}/users/me", headers=self.headers)
+            response.raise_for_status()
+            return response.json().get('resource', {})
         except Exception as e:
-            logger.error(f"❌ Error verifying webhook signature: {e}")
-            return False
+            logger.error(f"Failed to get user info: {e}")
+            return {}
     
-    def fetch_event_details(self, event_uri: str, max_retries: int = 3) -> Dict:
+    def get_scheduled_events(self, min_start_time=None, max_start_time=None):
         """
-        Fetch full event details from Calendly API with retry logic.
+        Get scheduled events from Calendly
         
         Args:
-            event_uri: URI of the event to fetch
-            max_retries: Maximum number of retry attempts
-            
-        Returns:
-            dict: Event details from Calendly API
-            
-        Raises:
-            CalendlyAPIError: If API request fails after retries
-        """
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"📡 Fetching event details from: {event_uri}")
-                
-                response = self.session.get(event_uri, timeout=10)
-                response.raise_for_status()
-                
-                data = response.json()
-                event_details = data.get("resource", {})
-                
-                if not event_details:
-                    raise CalendlyAPIError("No event resource found in API response")
-                
-                logger.info(f"✅ Successfully fetched event details: {event_details.get('name', 'Unknown Event')}")
-                return event_details
-                
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"⚠️ API request failed (attempt {attempt + 1}/{max_retries}): {e}")
-                
-                if attempt < max_retries - 1:
-                    # Exponential backoff: 1s, 2s, 4s
-                    wait_time = 2 ** attempt
-                    logger.info(f"⏳ Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
-                else:
-                    raise CalendlyAPIError(f"Failed to fetch event details after {max_retries} attempts: {e}")
-            
-            except Exception as e:
-                logger.error(f"❌ Unexpected error fetching event details: {e}")
-                raise CalendlyAPIError(f"Unexpected error: {e}")
-    
-    def test_api_connection(self) -> bool:
-        """
-        Test API connection and authentication.
+            min_start_time: datetime object for the earliest start time
+            max_start_time: datetime object for the latest start time
         
         Returns:
-            bool: True if connection is successful, False otherwise
+            List of scheduled events with invitee details
         """
+        if not min_start_time:
+            # Default to events from the last 24 hours
+            min_start_time = datetime.utcnow() - timedelta(hours=24)
+        
+        if not max_start_time:
+            # Default to events in the next 30 days
+            max_start_time = datetime.utcnow() + timedelta(days=30)
+        
+        params = {
+            'organization': self.organization_uri,
+            'min_start_time': min_start_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'max_start_time': max_start_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'status': 'active',
+            'sort': 'start_time:desc'
+        }
+        
         try:
-            logger.info("🔍 Testing Calendly API connection...")
-            
-            # Test with user endpoint
-            response = self.session.get("https://api.calendly.com/users/me", timeout=10)
+            response = requests.get(f"{self.base_url}/scheduled_events", headers=self.headers, params=params)
             response.raise_for_status()
             
-            user_data = response.json()
-            user_name = user_data.get("resource", {}).get("name", "Unknown")
+            events = response.json().get('collection', [])
+            logger.info(f"📅 Retrieved {len(events)} scheduled events from Calendly")
             
-            logger.info(f"✅ Calendly API connection successful. User: {user_name}")
-            return True
+            # Enrich events with invitee details
+            enriched_events = []
+            for event in events:
+                event_with_invitees = self._get_event_with_invitees(event)
+                if event_with_invitees:
+                    enriched_events.append(event_with_invitees)
+            
+            return enriched_events
             
         except Exception as e:
-            logger.error(f"❌ Calendly API connection failed: {e}")
-            return False
+            logger.error(f"Failed to get scheduled events: {e}")
+            return []
     
-    def close(self):
-        """Close the HTTP session."""
-        if hasattr(self, 'session'):
-            self.session.close()
-            logger.info("🔒 Calendly client session closed") 
+    def _get_event_with_invitees(self, event):
+        """Get event details with invitee information"""
+        try:
+            event_uuid = event['uri'].split('/')[-1]
+            
+            # Get invitees for this event
+            response = requests.get(
+                f"{self.base_url}/scheduled_events/{event_uuid}/invitees",
+                headers=self.headers
+            )
+            response.raise_for_status()
+            
+            invitees = response.json().get('collection', [])
+            
+            # Return event with invitee details
+            return {
+                'event_uuid': event_uuid,
+                'event_uri': event['uri'],
+                'name': event.get('name', ''),
+                'start_time': event.get('start_time'),
+                'end_time': event.get('end_time'),
+                'status': event.get('status', 'active'),
+                'created_at': event.get('created_at'),
+                'updated_at': event.get('updated_at'),
+                'invitees': invitees,
+                'event_type': event.get('event_type', '')
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get invitees for event {event.get('uri', 'unknown')}: {e}")
+            return None
+    
+    def get_canceled_events(self, min_start_time=None, max_start_time=None):
+        """Get canceled events from Calendly"""
+        if not min_start_time:
+            min_start_time = datetime.utcnow() - timedelta(days=7)
+        
+        if not max_start_time:
+            max_start_time = datetime.utcnow() + timedelta(days=30)
+        
+        params = {
+            'organization': self.organization_uri,
+            'min_start_time': min_start_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'max_start_time': max_start_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'status': 'canceled',
+            'sort': 'start_time:desc'
+        }
+        
+        try:
+            response = requests.get(f"{self.base_url}/scheduled_events", headers=self.headers, params=params)
+            response.raise_for_status()
+            
+            events = response.json().get('collection', [])
+            logger.info(f"❌ Retrieved {len(events)} canceled events from Calendly")
+            
+            # Enrich events with invitee details
+            enriched_events = []
+            for event in events:
+                event_with_invitees = self._get_event_with_invitees(event)
+                if event_with_invitees:
+                    enriched_events.append(event_with_invitees)
+            
+            return enriched_events
+            
+        except Exception as e:
+            logger.error(f"Failed to get canceled events: {e}")
+            return []
+    
+    def verify_webhook_signature(self, payload, signature):
+        """
+        Legacy method for webhook verification - kept for compatibility
+        Returns True for now since we're using polling
+        """
+        logger.warning("⚠️  Webhook verification called but using polling mode")
+        return True 

@@ -45,6 +45,23 @@ class QualificationEngine:
             }
         }
     
+    def qualify_prospect(self, prospect_data):
+        """
+        Qualify prospect - returns boolean result
+        
+        Args:
+            prospect_data (dict): Prospect information
+            
+        Returns:
+            bool: True if qualified, False otherwise
+        """
+        try:
+            result = self.evaluate_prospect(prospect_data)
+            return result.get('qualified', False)
+        except Exception as e:
+            logger.error(f"Error qualifying prospect: {e}")
+            return False
+
     def evaluate_prospect(self, prospect_data):
         """
         Evaluate prospect based on business rules

@@ -1,4 +1,17 @@
 /**
+ * ⚠️ NOTE: THIS GOOGLE APPS SCRIPT IS NOT CURRENTLY IN USE
+ * 
+ * We decided to use Google Sheets monitoring instead of webhooks.
+ * The system monitors the Google Sheets directly every 30 seconds for new submissions.
+ * 
+ * This file is kept for reference only.
+ * 
+ * Current Integration Method: Google Sheets Polling
+ * File: src/integrations/sheets_monitor.py
+ * Endpoint: /api/sheets-monitor/start
+ */
+
+/**
  * Google Apps Script for Google Forms Webhook Integration
  * 
  * SETUP INSTRUCTIONS:
@@ -11,7 +24,7 @@
  */
 
 // ⚠️ IMPORTANT: Update this URL to your server's webhook endpoint
-const WEBHOOK_URL = 'http://localhost:5002/webhook/forms'; // For local testing
+const WEBHOOK_URL = 'https://9cd3def799a4.ngrok-free.app/webhook/forms'; // Current ngrok URL
 // For production, use your public URL: const WEBHOOK_URL = 'https://your-domain.com/webhook/forms';
 
 /**
