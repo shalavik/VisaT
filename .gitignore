@@ -243,3 +243,4 @@ chrome-session/
 chrome-session-*/
 *.crx
 *.pem config/google_service_account.json
+config/google_service_account.json
