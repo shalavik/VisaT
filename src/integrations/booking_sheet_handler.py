@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+import pytz
 from .sheets_client_fixed import SheetsClientFixed
 import os
 
@@ -10,11 +11,15 @@ class BookingSheetHandler:
         self.sheets_client = SheetsClientFixed()
         self.spreadsheet_id = os.getenv('GOOGLE_SHEETS_ID')
         self.sheet_name = "Form Responses 1"  # Use existing form responses sheet
+        # Define timezone for Thailand (UTC+7)
+        self.thailand_tz = pytz.timezone('Asia/Bangkok')
         logger.info("📊 BookingSheetHandler initialized for existing form responses")
     
     def update_booking_info(self, invitee_email, scheduled_time_utc, is_canceled=False):
         """
         Update booking information for an existing form response based on email
+        Only updates if the new booking is more recent than existing booking
+        Exception: Cancellation updates are always allowed
         
         Args:
             invitee_email: Email to match in the form responses
@@ -43,42 +48,175 @@ class BookingSheetHandler:
             
             # Find matching row
             matching_row_index = None
+            existing_scheduled_time = None
+            existing_canceled_status = None
             for i, row in enumerate(form_data[1:], start=2):  # Start from row 2 (skip headers)
                 if len(row) > email_column_index and row[email_column_index] == invitee_email:
                     matching_row_index = i
+                    # Get existing scheduled time if column exists
+                    if (scheduled_time_column_index != -1 and 
+                        len(row) > scheduled_time_column_index and 
+                        row[scheduled_time_column_index]):
+                        existing_scheduled_time = row[scheduled_time_column_index]
+                    # Get existing canceled status
+                    if (canceled_column_index != -1 and 
+                        len(row) > canceled_column_index and 
+                        row[canceled_column_index]):
+                        existing_canceled_status = row[canceled_column_index]
                     break
             
             if not matching_row_index:
                 logger.warning(f"No form response found for email: {invitee_email}")
                 return False
             
+            # Check if we should update
+            # Always allow cancellation updates, otherwise check timestamps
+            if is_canceled:
+                # Always allow cancellation updates
+                should_update = True
+                logger.info(f"🚫 Processing cancellation for {invitee_email}")
+            else:
+                # For regular bookings, only update if newer
+                should_update = self._should_update_booking(scheduled_time_utc, existing_scheduled_time)
+            
+            if not should_update:
+                logger.info(f"⏭️ Skipping update for {invitee_email} - existing booking is more recent")
+                return False
+            
+            # Convert UTC time to Thailand time (UTC+7) for display
+            thailand_time_str = self._convert_to_thailand_time(scheduled_time_utc)
+            
             # Update the booking information
             updates_made = False
             
-            # Update Scheduled Time (UTC)
-            if scheduled_time_column_index != -1 and scheduled_time_utc:
-                success = self._update_cell(matching_row_index, scheduled_time_column_index + 1, scheduled_time_utc)
+            # Update Scheduled Time (Thailand Time - UTC+7) - only if not canceling
+            if scheduled_time_column_index != -1 and thailand_time_str and not is_canceled:
+                success = self._update_cell(matching_row_index, scheduled_time_column_index + 1, thailand_time_str)
                 if success:
-                    logger.info(f"✅ Updated scheduled time for {invitee_email}: {scheduled_time_utc}")
+                    logger.info(f"✅ Updated scheduled time for {invitee_email}: {thailand_time_str} (Thailand Time)")
                     updates_made = True
                 else:
                     logger.error(f"Failed to update scheduled time for {invitee_email}")
             
-            # Update Canceled status
+            # Update Canceled status - always update this field
             if canceled_column_index != -1:
                 canceled_value = "TRUE" if is_canceled else "FALSE"
-                success = self._update_cell(matching_row_index, canceled_column_index + 1, canceled_value)
-                if success:
-                    logger.info(f"✅ Updated canceled status for {invitee_email}: {canceled_value}")
-                    updates_made = True
+                # Only update if the status actually changed
+                if existing_canceled_status != canceled_value:
+                    success = self._update_cell(matching_row_index, canceled_column_index + 1, canceled_value)
+                    if success:
+                        logger.info(f"✅ Updated canceled status for {invitee_email}: {canceled_value}")
+                        updates_made = True
+                    else:
+                        logger.error(f"Failed to update canceled status for {invitee_email}")
                 else:
-                    logger.error(f"Failed to update canceled status for {invitee_email}")
+                    logger.info(f"ℹ️ Canceled status for {invitee_email} already set to {canceled_value}")
             
             return updates_made
             
         except Exception as e:
             logger.error(f"Error updating booking info for {invitee_email}: {e}")
             return False
+    
+    def _should_update_booking(self, new_scheduled_time_utc, existing_scheduled_time):
+        """
+        Check if we should update the booking based on timestamps
+        Only update if new booking is more recent
+        """
+        try:
+            if not existing_scheduled_time:
+                # No existing booking, safe to update
+                return True
+            
+            # Parse the new UTC time
+            if isinstance(new_scheduled_time_utc, str):
+                new_dt = datetime.fromisoformat(new_scheduled_time_utc.replace('Z', '+00:00'))
+            else:
+                new_dt = new_scheduled_time_utc
+            
+            # Parse existing time (could be in Thailand format or UTC)
+            existing_dt = self._parse_existing_time(existing_scheduled_time)
+            if not existing_dt:
+                # Can't parse existing time, safe to update
+                return True
+            
+            # Compare timestamps - only update if new booking is more recent
+            is_newer = new_dt > existing_dt
+            logger.debug(f"Comparing times: new={new_dt} vs existing={existing_dt}, is_newer={is_newer}")
+            return is_newer
+            
+        except Exception as e:
+            logger.error(f"Error comparing booking timestamps: {e}")
+            # On error, allow update to be safe
+            return True
+    
+    def _parse_existing_time(self, time_str):
+        """Parse existing time string which could be in various formats"""
+        try:
+            # Common formats we might encounter
+            formats = [
+                "%Y-%m-%dT%H:%M:%S.%fZ",     # UTC with microseconds
+                "%Y-%m-%dT%H:%M:%SZ",        # UTC without microseconds
+                "%Y-%m-%d %H:%M:%S +07",     # Thailand local time (new format)
+                "%Y-%m-%d %H:%M:%S",         # Thailand local time (without timezone)
+                "%Y-%m-%dT%H:%M:%S",         # ISO without timezone
+            ]
+            
+            for fmt in formats:
+                try:
+                    if "+07" in str(time_str):
+                        # Parse Thailand time format specifically
+                        dt_str = str(time_str).replace(" +07", "")
+                        dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+                        # Localize to Thailand timezone
+                        dt = self.thailand_tz.localize(dt)
+                    else:
+                        dt = datetime.strptime(str(time_str), fmt)
+                        
+                        # If no timezone info, assume based on format
+                        if dt.tzinfo is None:
+                            if 'Z' in str(time_str):
+                                # UTC format
+                                dt = dt.replace(tzinfo=pytz.UTC)
+                            else:
+                                # Assume Thailand time
+                                dt = self.thailand_tz.localize(dt)
+                    
+                    return dt
+                except ValueError:
+                    continue
+            
+            logger.warning(f"Could not parse existing time format: {time_str}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error parsing existing time: {e}")
+            return None
+    
+    def _convert_to_thailand_time(self, utc_time_str):
+        """Convert UTC time to Thailand time (UTC+7) for display"""
+        try:
+            # Parse UTC time
+            if isinstance(utc_time_str, str):
+                utc_dt = datetime.fromisoformat(utc_time_str.replace('Z', '+00:00'))
+            else:
+                utc_dt = utc_time_str
+            
+            # Ensure it's UTC timezone aware
+            if utc_dt.tzinfo is None:
+                utc_dt = pytz.UTC.localize(utc_dt)
+            elif utc_dt.tzinfo != pytz.UTC:
+                utc_dt = utc_dt.astimezone(pytz.UTC)
+            
+            # Convert to Thailand time
+            thailand_dt = utc_dt.astimezone(self.thailand_tz)
+            
+            # Format for display (readable format with timezone)
+            return thailand_dt.strftime("%Y-%m-%d %H:%M:%S +07")
+            
+        except Exception as e:
+            logger.error(f"Error converting to Thailand time: {e}")
+            return utc_time_str  # Return original if conversion fails
     
     def _get_form_data(self):
         """Get all form response data"""
