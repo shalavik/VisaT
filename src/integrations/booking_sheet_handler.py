@@ -236,9 +236,9 @@ class BookingSheetHandler:
         return -1
     
     def _find_scheduled_time_column_index(self, headers):
-        """Find the index of the Scheduled Time (UTC) column"""
+        """Find the index of the Scheduled Time column (supports both UTC and GMT+7 formats)"""
         for i, header in enumerate(headers):
-            if 'Scheduled Time (UTC)' in str(header):
+            if 'Scheduled Time (UTC)' in str(header) or 'Scheduled Time (GMT+7)' in str(header):
                 return i
         return -1
     
