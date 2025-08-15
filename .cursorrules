@@ -1,0 +1,285 @@
+# .cursorrules
+# version: 1.2.0
+# Author: Adapted for Slava — Python-first, multi-stack projects
+# Purpose: Consistent AI assistance for coding, refactors, tests, and docs
+
+# -------------------- 🔍 File Matching --------------------
+include:
+  # Common code & config
+  - "*.py"
+  - "*.ipynb"
+  - "*.sh"
+  - "*.ps1"
+  - "*.sql"
+  - "*.ini"
+  - "*.cfg"
+  - "*.conf"
+  - "*.env*"
+  - "*.json"
+  - "*.jsonc"
+  - "*.yaml"
+  - "*.yml"
+  - "*.toml"
+  - "*.md"
+  - "*.rst"
+
+  # Web / frontend
+  - "*.html"
+  - "*.css"
+  - "*.scss"
+  - "*.sass"
+  - "*.less"
+  - "*.js"
+  - "*.jsx"
+  - "*.ts"
+  - "*.tsx"
+
+  # Infra
+  - "Dockerfile"
+  - "docker-compose*.yml"
+  - "*.tf"
+
+  # Project trees
+  - "src/**"
+  - "app/**"
+  - "backend/**"
+  - "frontend/**"
+  - "server/**"
+  - "client/**"
+  - "scripts/**"
+  - "tests/**"
+  - "notebooks/**"
+
+  # Python packaging
+  - "pyproject.toml"
+  - "setup.py"
+  - "setup.cfg"
+  - "requirements*.txt"
+
+exclude:
+  - "*.pyc"
+  - "__pycache__/**"
+  - ".pytest_cache/**"
+  - ".mypy_cache/**"
+  - ".ruff_cache/**"
+  - ".coverage*"
+  - "coverage/**"
+  - "dist/**"
+  - "build/**"
+  - "site/**"
+  - "node_modules/**"
+  - ".next/**"
+  - ".turbo/**"
+  - ".git/**"
+  - "**/.DS_Store"
+  - ".venv/**"
+  - "venv/**"
+  - ".env"
+  - "*.log"
+  - "*.backup"
+
+search_paths:
+  - "."
+  - "src/"
+  - "app/"
+  - "backend/"
+  - "frontend/"
+  - "tests/"
+
+max_search_file_size: 5242880   # 5 MB
+
+# -------------------- ✍️ Editor Defaults --------------------
+editor:
+  tab_size: 4
+  insert_spaces: true
+  end_of_line: lf
+  trim_trailing_whitespace: true
+  ensure_newline_at_eof: true
+
+# -------------------- 🤖 AI Behavior Rules --------------------
+rules:
+
+  # ---------------------------------------------------------------------------
+  general_guidelines:
+    description: "Project-wide behaviour, code standards and workflow"
+    enabled: true
+    rules:
+      # 📝 Docs & Language
+      - description: "Everything (code, docs, comments, commit messages) must be in English."
+      - description: "Prefer concise, action-oriented commit messages: <scope>: <change>."
+      - description: "When adding functions/classes/modules in Python, include docstrings (PEP 257) and type hints."
+
+      # 🏷️ Naming & Terminology
+      - description: "Follow PEP 8: snake_case functions/vars, PascalCase classes, CONSTANT_CASE for constants."
+      - description: "Use domain-accurate terms. If unclear, infer from context rather than pausing for confirmation."
+
+      # 🧹 Clean Code
+      - description: "Keep functions ≤ 50 lines. Extract helpers before exceeding this."
+      - description: "Prefer pathlib over os.path; use f-strings over format/%."
+      - description: "Isolate side effects; keep pure logic testable."
+
+      # 🏗️ Architecture
+      - description: "Separate concerns: core logic (src/ or app/), adapters (io/clients), interface (CLI/API/UI)."
+      - description: "Configuration via environment variables; provide sane defaults for local dev."
+      - description: "Avoid hidden global state; prefer dependency injection for IO/external services."
+
+      # 🏃 Execution Flow
+      - description: "Do not prompt for confirmation. Execute sequentially and handle errors gracefully."
+      - description: "Use logging levels appropriately (DEBUG/INFO/WARNING/ERROR). No noisy prints in libraries."
+
+      # 🔧 Git & Version Control
+      - description: "Prefer rebases for small, linear histories; use merges for large feature branches."
+      - description: "On conflicts, resolve minimally and preserve intent; do NOT blindly favor local or remote."
+      - description: "Never commit secrets or .env files."
+
+      # 📦 Python Tooling (default)
+      - description: "Format with black, import-sort with isort (black profile), lint with ruff, type-check with mypy."
+      - description: "If pyproject.toml exists, extend tools there; otherwise propose minimal configs."
+
+      # 📈 Performance
+      - description: "Use async/await for network and disk IO when beneficial."
+      - description: "Cache or memoize expensive operations with clear invalidation."
+
+      # 🔐 Security
+      - description: "Parameterize all SQL; validate/escape user input; never print secrets."
+      - description: "For web apps, set secure headers and CSRF protection where relevant."
+
+  # ---------------------------------------------------------------------------
+  python_standards:
+    description: "Python-specific quality bar"
+    enabled: true
+    rules:
+      - description: "Every new/changed function must have type hints for params and return."
+      - description: "Add/adjust unit tests with pytest; mirror package structure under tests/."
+      - description: "Mock external calls (HTTP/DB/cloud) in tests (pytest-mock, responses, httpx MockTransport)."
+      - description: "Raise specific exceptions; avoid bare except; prefer context managers."
+      - description: "Provide minimal reproducible CLI entry points for scripts (argparse/typer)."
+
+  # ---------------------------------------------------------------------------
+  js_ts_standards:
+    description: "JavaScript/TypeScript & web hygiene"
+    enabled: true
+    rules:
+      - description: "Prefer TypeScript for new frontend code; use strict mode."
+      - description: "Gracefully handle null/undefined data from APIs."
+      - description: "Use semantic HTML and accessible ARIA patterns; prefer small, framework-light solutions when possible."
+      - description: "Return proper HTTP status codes from APIs and a structured error response body."
+
+  # ---------------------------------------------------------------------------
+  web_interface:
+    description: "Web UI/API specifics"
+    enabled: true
+    rules:
+      - description: "Keep client logic simple; avoid unnecessary complex state management."
+      - description: "Implement CORS only when needed and document allowed origins."
+      - description: "Validate request payloads server-side; never trust client."
+
+  # ---------------------------------------------------------------------------
+  database_operations:
+    description: "DB integrity & performance"
+    enabled: true
+    rules:
+      - description: "Always parameterize queries; use transactions for multi-step changes."
+      - description: "Use connection pooling; ensure cleanup via context managers."
+      - description: "Add indexes on frequently-filtered columns; write migrations with rollback plans."
+
+  # ---------------------------------------------------------------------------
+  testing_TDD:
+    description: "Tests-first development"
+    enabled: true
+    rules:
+      - description: "Write/update tests BEFORE new logic. Merge only when tests pass locally."
+      - description: "Provide both positive and negative cases; include edge cases."
+      - description: "For bug fixes, first add a failing test reproducing the bug, then fix."
+
+  # ---------------------------------------------------------------------------
+  data_science_and_notebooks:
+    description: "If notebooks are present"
+    enabled: true
+    rules:
+      - description: "Keep notebooks deterministic; move reusable code to src/ and import it."
+      - description: "Avoid storing large outputs; clear state before committing notebooks."
+
+  # ---------------------------------------------------------------------------
+  devops_and_ci:
+    description: "Builds, containers, CI suggestions"
+    enabled: true
+    rules:
+      - description: "Provide minimal Dockerfiles when useful (multi-stage for Python to slim images)."
+      - description: "Add CI checks for ruff/black/mypy/pytest; fail fast with clear messages."
+      - description: "Use .dockerignore to reduce context size."
+
+  # ---------------------------------------------------------------------------
+  documentation:
+    description: "Docs that stay useful"
+    enabled: true
+    rules:
+      - description: "README must include: overview, setup, run tests, lint/type-check, and examples."
+      - description: "If introducing a module or public API, add short usage snippets."
+      - description: "Keep CHANGELOG or release notes when versions/tags are used."
+
+  # ---------------------------------------------------------------------------
+  refactors_and_migrations:
+    description: "When touching existing code"
+    enabled: true
+    rules:
+      - description: "Do small, scoped refactors; keep behavior identical unless explicitly requested."
+      - description: "Provide automated codemods only when safe and covered by tests."
+      - description: "Mark deprecated APIs and provide migration guidance."
+
+  # ---------------------------------------------------------------------------
+  token_economy:
+    description: "Cost/latency awareness for AI usage"
+    enabled: false
+    rules:
+      - description: "Limit per-request context to ≤ 30k tokens and ≤ 10 files; chunk larger tasks."
+      - description: "Summarize large files before deep reasoning; reuse summaries across steps."
+
+# -------------------- 🛠️ Suggested Tooling Config (optional) --------------------
+# If the repo lacks these, Cursor can propose them.
+
+suggested_configs:
+  pyproject_toml:
+    enabled: true
+    template: |
+      [tool.black]
+      line-length = 100
+      target-version = ["py39","py310","py311","py312"]
+
+      [tool.isort]
+      profile = "black"
+      line_length = 100
+
+      [tool.ruff]
+      line-length = 100
+      target-version = "py39"
+      select = ["E","F","I","B","UP","SIM"]
+      ignore = ["E203"]  # Compatible with black
+      exclude = [".venv","venv","build","dist","node_modules"]
+
+      [tool.mypy]
+      python_version = "3.11"
+      warn_unused_ignores = true
+      warn_redundant_casts = true
+      disallow_untyped_defs = true
+      no_implicit_optional = true
+      strict_optional = true
+      ignore_missing_imports = true
+
+  editorconfig:
+    enabled: true
+    template: |
+      root = true
+
+      [*]
+      indent_style = space
+      indent_size = 4
+      end_of_line = lf
+      charset = utf-8
+      trim_trailing_whitespace = true
+      insert_final_newline = true
+
+      [*.{js,jsx,ts,tsx,css,scss,html,json,yaml,yml}]
+      indent_size = 2
+
+# End of .cursorrules

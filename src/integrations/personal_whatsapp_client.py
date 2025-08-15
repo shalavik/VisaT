@@ -136,18 +136,81 @@ class PersonalWhatsAppClient:
                     
                     # Use the manually downloaded ChromeDriver
                     local_chromedriver = os.path.abspath("./chromedriver-mac-arm64/chromedriver")
+                    driver_initialized = False
+                    last_error = None
                     
+                    # Attempt 1: Use local chromedriver if present
                     if os.path.exists(local_chromedriver) and os.access(local_chromedriver, os.X_OK):
-                        logger.info(f"Using local ChromeDriver: {local_chromedriver}")
-                        service = Service(local_chromedriver)
+                        try:
+                            logger.info(f"Using local ChromeDriver: {local_chromedriver}")
+                            service = Service(local_chromedriver)
+                            PersonalWhatsAppClient._driver = webdriver.Chrome(service=service, options=options)
+                            driver_initialized = True
+                            logger.info("ChromeDriver configured successfully (local)")
+                        except Exception as e:
+                            last_error = str(e)
+                            logger.warning(f"Local ChromeDriver failed: {e}")
+                            # Detect common version mismatch and fall back
+                            if "only supports Chrome version" in last_error or "session not created" in last_error:
+                                logger.info("Detected ChromeDriver/Chrome version mismatch. Falling back to WebDriverManager to install a compatible driver...")
+                            else:
+                                logger.info("Falling back to WebDriverManager due to driver initialization error...")
                     else:
-                        # Fallback to WebDriverManager only if local doesn't exist
-                        logger.info("Local ChromeDriver not found, using WebDriverManager...")
-                        service = Service(ChromeDriverManager().install())
+                        logger.info("Local ChromeDriver not found or not executable, will use WebDriverManager...")
                     
-                    logger.info("ChromeDriver configured successfully")
+                    # Attempt 2: WebDriverManager fallback if not initialized yet
+                    if not driver_initialized:
+                        try:
+                            driver_path = ChromeDriverManager().install()
+                            resolved_path = driver_path
+                            
+                            # If WebDriverManager returned a non-binary file (e.g., THIRD_PARTY_NOTICES), resolve the actual chromedriver
+                            try:
+                                basename = os.path.basename(driver_path)
+                                if basename.endswith('.chromedriver') or 'THIRD_PARTY_NOTICES' in basename or 'LICENSE' in basename:
+                                    candidate_dir = os.path.dirname(driver_path)
+                                    possible_locations = [
+                                        os.path.join(candidate_dir, 'chromedriver'),
+                                        os.path.join(candidate_dir, 'chromedriver-mac-arm64', 'chromedriver'),
+                                        os.path.join(candidate_dir, 'chromedriver-mac-x64', 'chromedriver'),
+                                    ]
+                                    # Search recursively if needed
+                                    for root, dirs, files in os.walk(candidate_dir):
+                                        if 'chromedriver' in files:
+                                            possible_locations.append(os.path.join(root, 'chromedriver'))
+                                    # Pick the first existing one
+                                    for path in possible_locations:
+                                        if os.path.exists(path):
+                                            resolved_path = path
+                                            break
+                            except Exception as _:
+                                pass
+                            
+                            # Ensure executable permission
+                            try:
+                                if os.path.exists(resolved_path):
+                                    os.chmod(resolved_path, 0o755)
+                            except Exception:
+                                pass
+                            
+                            service = Service(resolved_path)
+                            PersonalWhatsAppClient._driver = webdriver.Chrome(service=service, options=options)
+                            driver_initialized = True
+                            logger.info("ChromeDriver configured successfully (WebDriverManager)")
+                        except Exception as e2:
+                            last_error = str(e2)
+                            logger.error(f"WebDriverManager failed to initialize ChromeDriver: {e2}")
+                            # Final fallback: Selenium Manager (Selenium 4.6+)
+                            try:
+                                logger.info("Attempting Selenium Manager fallback (no explicit driver path)...")
+                                PersonalWhatsAppClient._driver = webdriver.Chrome(options=options)
+                                driver_initialized = True
+                                logger.info("ChromeDriver configured successfully (Selenium Manager)")
+                            except Exception as e3:
+                                logger.error(f"Selenium Manager fallback failed: {e3}")
+                                raise
                     
-                    PersonalWhatsAppClient._driver = webdriver.Chrome(service=service, options=options)
+                    # Post-initialization browser setup
                     PersonalWhatsAppClient._driver.maximize_window()
                     
                     # Navigate to WhatsApp Web

@@ -69,24 +69,21 @@ class CalendlyPoller:
         try:
             logger.info("🔍 Polling Calendly for booking updates...")
             
-            # Get the timestamp of the last known booking to optimize polling
-            last_booking_time = self.booking_handler.get_latest_booking_timestamp()
-            
-            if last_booking_time:
-                # Poll from last known booking time minus 1 hour buffer
-                min_start_time = last_booking_time - timedelta(hours=1)
-            else:
-                # First time polling - get bookings from last 7 days
-                min_start_time = datetime.utcnow() - timedelta(days=7)
+            # Always poll a recent window to catch reschedules/cancellations
+            # that may move earlier than the previously recorded time
+            min_start_time = datetime.utcnow() - timedelta(days=14)
+            max_start_time = datetime.utcnow() + timedelta(days=30)
             
             # Get scheduled events
             scheduled_events = self.calendly_client.get_scheduled_events(
-                min_start_time=min_start_time
+                min_start_time=min_start_time,
+                max_start_time=max_start_time
             )
             
             # Get canceled events  
             canceled_events = self.calendly_client.get_canceled_events(
-                min_start_time=min_start_time
+                min_start_time=min_start_time,
+                max_start_time=max_start_time
             )
             
             # Process all events
@@ -96,11 +93,65 @@ class CalendlyPoller:
                 logger.info("📅 No new booking updates found")
                 return
             
-            # Update Google Sheet with each booking
-            updated_count = 0
+            # Aggregate per invitee: choose the most recently updated event (prefer active)
+            def _parse_dt(value: str):
+                try:
+                    if not value:
+                        return None
+                    return datetime.fromisoformat(value.replace('Z', '+00:00'))
+                except Exception:
+                    return None
+            
+            best_by_email = {}
             for event in all_events:
-                if self._process_event(event):
-                    updated_count += 1
+                event_updated = _parse_dt(event.get('updated_at')) or _parse_dt(event.get('created_at')) or _parse_dt(event.get('start_time'))
+                event_status = event.get('status', 'active')
+                event_start = event.get('start_time')
+                invitees = event.get('invitees', []) or []
+                for inv in invitees:
+                    email = (inv.get('email') or '').strip().lower()
+                    if not email:
+                        continue
+                    current = best_by_email.get(email)
+                    if current is None:
+                        best_by_email[email] = {
+                            'updated_at': event_updated,
+                            'status': event_status,
+                            'start_time': event_start,
+                        }
+                    else:
+                        # Decide if this event is more recent
+                        cur_updated = current['updated_at']
+                        if cur_updated is None or (event_updated and event_updated > cur_updated):
+                            best_by_email[email] = {
+                                'updated_at': event_updated,
+                                'status': event_status,
+                                'start_time': event_start,
+                            }
+                        elif event_updated == cur_updated:
+                            # Prefer active over canceled on tie
+                            if current['status'] == 'canceled' and event_status != 'canceled':
+                                best_by_email[email] = {
+                                    'updated_at': event_updated,
+                                    'status': event_status,
+                                    'start_time': event_start,
+                                }
+            
+            # Apply updates once per invitee
+            updated_count = 0
+            for email, info in best_by_email.items():
+                try:
+                    is_canceled = (info['status'] == 'canceled')
+                    booking_data = {
+                        'invitee_email': email,
+                        'scheduled_time': info['start_time'],
+                        'status': info['status']
+                    }
+                    if self.booking_handler.upsert_booking(booking_data):
+                        updated_count += 1
+                except Exception as e:
+                    logger.error(f"Error updating booking for {email}: {e}")
+                    continue
             
             logger.info(f"✅ Processed {updated_count} booking updates")
             

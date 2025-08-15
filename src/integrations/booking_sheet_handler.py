@@ -18,13 +18,7 @@ class BookingSheetHandler:
     def update_booking_info(self, invitee_email, scheduled_time_utc, is_canceled=False):
         """
         Update booking information for an existing form response based on email
-        Only updates if the new booking is more recent than existing booking
-        Exception: Cancellation updates are always allowed
-        
-        Args:
-            invitee_email: Email to match in the form responses
-            scheduled_time_utc: Scheduled time in UTC format
-            is_canceled: Boolean indicating if booking is canceled
+        Reflects any time change (earlier or later) and cancellation status
         """
         try:
             if not self.spreadsheet_id:
@@ -37,31 +31,43 @@ class BookingSheetHandler:
                 logger.warning("No form data found")
                 return False
             
-            # Find the row with matching email
-            email_column_index = self._find_email_column_index(form_data[0])  # Headers row
-            scheduled_time_column_index = self._find_scheduled_time_column_index(form_data[0])
-            canceled_column_index = self._find_canceled_column_index(form_data[0])
+            # Header indices
+            headers = form_data[0]
+            email_column_index = self._find_email_column_index(headers)
+            scheduled_time_column_index = self._find_scheduled_time_column_index(headers)
+            canceled_column_index = self._find_canceled_column_index(headers)
             
             if email_column_index == -1:
                 logger.error("Could not find email column in form responses")
                 return False
             
-            # Find matching row
+            # Normalize target email
+            target_email = (invitee_email or "").strip().lower()
+            if not target_email:
+                logger.warning("Empty invitee email in booking data")
+                return False
+            
+            # Find the latest matching row (scan from bottom)
             matching_row_index = None
             existing_scheduled_time = None
             existing_canceled_status = None
-            for i, row in enumerate(form_data[1:], start=2):  # Start from row 2 (skip headers)
-                if len(row) > email_column_index and row[email_column_index] == invitee_email:
-                    matching_row_index = i
-                    # Get existing scheduled time if column exists
-                    if (scheduled_time_column_index != -1 and 
-                        len(row) > scheduled_time_column_index and 
-                        row[scheduled_time_column_index]):
+            for i in range(len(form_data) - 1, 0, -1):
+                row = form_data[i]
+                if len(row) > email_column_index and str(row[email_column_index]).strip().lower() == target_email:
+                    matching_row_index = i + 1  # Convert to 1-based index including header
+                    # Existing scheduled time
+                    if (
+                        scheduled_time_column_index != -1 and
+                        len(row) > scheduled_time_column_index and
+                        row[scheduled_time_column_index]
+                    ):
                         existing_scheduled_time = row[scheduled_time_column_index]
-                    # Get existing canceled status
-                    if (canceled_column_index != -1 and 
-                        len(row) > canceled_column_index and 
-                        row[canceled_column_index]):
+                    # Existing canceled status
+                    if (
+                        canceled_column_index != -1 and
+                        len(row) > canceled_column_index and
+                        row[canceled_column_index]
+                    ):
                         existing_canceled_status = row[canceled_column_index]
                     break
             
@@ -69,39 +75,33 @@ class BookingSheetHandler:
                 logger.warning(f"No form response found for email: {invitee_email}")
                 return False
             
-            # Check if we should update
-            # Always allow cancellation updates, otherwise check timestamps
-            if is_canceled:
-                # Always allow cancellation updates
-                should_update = True
-                logger.info(f"🚫 Processing cancellation for {invitee_email}")
-            else:
-                # For regular bookings, only update if newer
-                should_update = self._should_update_booking(scheduled_time_utc, existing_scheduled_time)
+            # Determine if we should update time (always allow cancellation updates)
+            should_update_time = False
+            if not is_canceled:
+                # Update if there is no existing time or if the timestamp differs (earlier or later)
+                should_update_time = self._has_time_changed(scheduled_time_utc, existing_scheduled_time)
             
-            if not should_update:
-                logger.info(f"⏭️ Skipping update for {invitee_email} - existing booking is more recent")
-                return False
+            # Convert UTC to Thailand time string for display
+            thailand_time_str = None
+            if scheduled_time_utc and not is_canceled:
+                thailand_time_str = self._convert_to_thailand_time(scheduled_time_utc)
             
-            # Convert UTC time to Thailand time (UTC+7) for display
-            thailand_time_str = self._convert_to_thailand_time(scheduled_time_utc)
-            
-            # Update the booking information
             updates_made = False
             
-            # Update Scheduled Time (Thailand Time - UTC+7) - only if not canceling
-            if scheduled_time_column_index != -1 and thailand_time_str and not is_canceled:
+            # Update Scheduled Time (Thailand, GMT+7) when time changed
+            if scheduled_time_column_index != -1 and thailand_time_str and should_update_time:
                 success = self._update_cell(matching_row_index, scheduled_time_column_index + 1, thailand_time_str)
                 if success:
-                    logger.info(f"✅ Updated scheduled time for {invitee_email}: {thailand_time_str} (Thailand Time)")
+                    logger.info(
+                        f"✅ Updated scheduled time for {invitee_email}: {thailand_time_str} (Thailand Time)"
+                    )
                     updates_made = True
                 else:
                     logger.error(f"Failed to update scheduled time for {invitee_email}")
             
-            # Update Canceled status - always update this field
+            # Update Canceled status if changed
             if canceled_column_index != -1:
                 canceled_value = "TRUE" if is_canceled else "FALSE"
-                # Only update if the status actually changed
                 if existing_canceled_status != canceled_value:
                     success = self._update_cell(matching_row_index, canceled_column_index + 1, canceled_value)
                     if success:
@@ -110,44 +110,54 @@ class BookingSheetHandler:
                     else:
                         logger.error(f"Failed to update canceled status for {invitee_email}")
                 else:
-                    logger.info(f"ℹ️ Canceled status for {invitee_email} already set to {canceled_value}")
+                    logger.debug(
+                        f"Canceled status for {invitee_email} unchanged ({canceled_value}), no update needed"
+                    )
             
             return updates_made
-            
+        
         except Exception as e:
             logger.error(f"Error updating booking info for {invitee_email}: {e}")
             return False
     
     def _should_update_booking(self, new_scheduled_time_utc, existing_scheduled_time):
         """
-        Check if we should update the booking based on timestamps
-        Only update if new booking is more recent
+        Deprecated: kept for compatibility. Use _has_time_changed instead.
         """
+        return self._has_time_changed(new_scheduled_time_utc, existing_scheduled_time)
+    
+    def _has_time_changed(self, new_scheduled_time_utc, existing_scheduled_time) -> bool:
+        """Return True if there is no existing time or the times differ (any change)."""
         try:
+            if not new_scheduled_time_utc:
+                return False
             if not existing_scheduled_time:
-                # No existing booking, safe to update
                 return True
             
-            # Parse the new UTC time
+            # Parse new UTC time
             if isinstance(new_scheduled_time_utc, str):
                 new_dt = datetime.fromisoformat(new_scheduled_time_utc.replace('Z', '+00:00'))
             else:
                 new_dt = new_scheduled_time_utc
+            # Normalize to UTC
+            import pytz
+            if new_dt.tzinfo is None:
+                new_dt = pytz.UTC.localize(new_dt)
+            else:
+                new_dt = new_dt.astimezone(pytz.UTC)
             
-            # Parse existing time (could be in Thailand format or UTC)
+            # Parse existing time from sheet (could be Thailand local)
             existing_dt = self._parse_existing_time(existing_scheduled_time)
             if not existing_dt:
-                # Can't parse existing time, safe to update
                 return True
+            # Normalize existing to UTC for comparison
+            existing_dt_utc = existing_dt.astimezone(pytz.UTC)
             
-            # Compare timestamps - only update if new booking is more recent
-            is_newer = new_dt > existing_dt
-            logger.debug(f"Comparing times: new={new_dt} vs existing={existing_dt}, is_newer={is_newer}")
-            return is_newer
-            
+            # Consider any difference greater than 1 minute as change
+            delta = abs((new_dt - existing_dt_utc).total_seconds())
+            return delta > 60
         except Exception as e:
             logger.error(f"Error comparing booking timestamps: {e}")
-            # On error, allow update to be safe
             return True
     
     def _parse_existing_time(self, time_str):
@@ -227,26 +237,52 @@ class BookingSheetHandler:
             return []
     
     def _find_email_column_index(self, headers):
-        """Find the index of the email column"""
-        email_keywords = ['email', 'Email Address', 'Your Email Address']
-        for keyword in email_keywords:
-            for i, header in enumerate(headers):
-                if keyword in str(header):
-                    return i
+        """Find the index of the email column (case-insensitive, tolerant)"""
+        try:
+            normalized = [str(h).strip().lower() for h in headers]
+            candidates = [
+                'your email address',
+                'email address',
+                'your email',
+                'email'
+            ]
+            for cand in candidates:
+                for i, h in enumerate(normalized):
+                    if cand in h:
+                        return i
+        except Exception:
+            pass
         return -1
     
     def _find_scheduled_time_column_index(self, headers):
-        """Find the index of the Scheduled Time column (supports both UTC and GMT+7 formats)"""
-        for i, header in enumerate(headers):
-            if 'Scheduled Time (UTC)' in str(header) or 'Scheduled Time (GMT+7)' in str(header):
-                return i
+        """Find the index of the Scheduled Time column, preferring GMT+7, fallback to UTC/any 'scheduled time' variant (case-insensitive)."""
+        try:
+            normalized = [str(h).strip().lower().replace(' ', '') for h in headers]
+            # Prefer GMT+7 variants
+            for i, h in enumerate(normalized):
+                if 'scheduled' in h and 'time' in h and ('gmt+7' in h or 'gmt7' in h or 'gmt+07' in h):
+                    return i
+            # Fallback to UTC
+            for i, h in enumerate(normalized):
+                if 'scheduled' in h and 'time' in h and 'utc' in h:
+                    return i
+            # Any column that looks like scheduled time
+            for i, h in enumerate(normalized):
+                if 'scheduled' in h and 'time' in h:
+                    return i
+        except Exception:
+            pass
         return -1
     
     def _find_canceled_column_index(self, headers):
-        """Find the index of the Canceled? column"""
-        for i, header in enumerate(headers):
-            if 'Canceled?' in str(header):
-                return i
+        """Find the index of the Canceled/Cancelled column (case-insensitive)."""
+        try:
+            normalized = [str(h).strip().lower().replace(' ', '') for h in headers]
+            for i, h in enumerate(normalized):
+                if 'canceled?' in h or 'cancelled?' in h or h == 'canceled' or h == 'cancelled' or 'canceled' in h or 'cancelled' in h:
+                    return i
+        except Exception:
+            pass
         return -1
     
     def _update_cell(self, row_index, col_index, value):
@@ -299,33 +335,32 @@ class BookingSheetHandler:
     def get_latest_booking_timestamp(self):
         """Get the timestamp of the most recent booking to optimize polling"""
         try:
-            # Get form data and check Scheduled Time column
             form_data = self._get_form_data()
             if not form_data or len(form_data) < 2:
                 return None
             
             headers = form_data[0]
             scheduled_time_index = self._find_scheduled_time_column_index(headers)
-            
             if scheduled_time_index == -1:
                 return None
             
-            # Find the most recent scheduled time
             latest_timestamp = None
-            for row in form_data[1:]:  # Skip headers
+            import pytz
+            for row in form_data[1:]:
                 if len(row) > scheduled_time_index:
                     scheduled_time = row[scheduled_time_index]
                     if scheduled_time:
                         try:
-                            # Parse ISO format timestamp
-                            timestamp = datetime.fromisoformat(scheduled_time.replace('Z', '+00:00'))
-                            if not latest_timestamp or timestamp > latest_timestamp:
-                                latest_timestamp = timestamp
-                        except:
+                            dt = self._parse_existing_time(scheduled_time)
+                            if not dt:
+                                continue
+                            # Normalize to UTC for Calendly API range
+                            dt_utc = dt.astimezone(pytz.UTC)
+                            if not latest_timestamp or dt_utc > latest_timestamp:
+                                latest_timestamp = dt_utc
+                        except Exception:
                             continue
-            
             return latest_timestamp
-            
         except Exception as e:
             logger.warning(f"Could not get latest booking timestamp: {e}")
             return None
