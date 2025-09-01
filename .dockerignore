@@ -1,0 +1,16 @@
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+.envrc
+.idea
+.vscode
+*.log
+node_modules/
+tests/
+*.sqlite
+config/google_service_account.json
